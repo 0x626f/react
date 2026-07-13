@@ -147,16 +147,27 @@ func (producer *ProducerService) reconnectChannel() {
 		producer.mu.Unlock()
 	}()
 
-	if retryErr := workers.DoWithRetries(producer.Ctx, func(retry int) error {
-		if retry > 0 {
-			time.Sleep(producer.rmq.Config.RetryDelay)
+	for {
+		select {
+		case <-producer.Ctx.Done():
+			return
+		default:
 		}
 
-		producer.Logger.Info("Retrying to create RMQ producer channel #%d", retry)
-		return producer.connectChannel()
-	}, producer.rmq.Config.RetryCount); retryErr != nil {
-		producer.Logger.Error("Couldn't recreate RMQ producer channel: %s", retryErr.Error())
-		producer.Stop()
+		if retryErr := workers.DoWithRetries(producer.Ctx, func(retry int) error {
+			if retry > 0 {
+				time.Sleep(producer.rmq.Config.RetryDelay)
+			}
+
+			producer.Logger.Info("Retrying to create RMQ producer channel #%d", retry)
+			return producer.connectChannel()
+		}, producer.rmq.Config.RetryCount); retryErr != nil {
+			producer.Logger.Error("Couldn't recreate RMQ producer channel: %s", retryErr.Error())
+			workers.Sleep(producer.Ctx, producer.rmq.Config.RetryDelay)
+			continue
+		}
+
+		return
 	}
 }
 

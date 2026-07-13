@@ -90,21 +90,27 @@ func (service *ConsumerService) markInactive(consumer *Consumer) {
 }
 
 func (service *ConsumerService) reconnectConsumer(consumer *Consumer) {
-	select {
-	case <-service.Ctx.Done():
-		return
-	default:
-	}
-
-	if retryErr := workers.DoWithRetries(service.Ctx, func(retry int) error {
-		if retry > 0 {
-			time.Sleep(service.rmq.Config.RetryDelay)
+	for {
+		select {
+		case <-service.Ctx.Done():
+			return
+		default:
 		}
 
-		service.Logger.Info("Retrying to consume from RMQ queue %s #%d", consumer.Queue.Name, retry)
-		return service.Consume(consumer)
-	}, service.rmq.Config.RetryCount); retryErr != nil {
-		service.Logger.Error("Couldn't consume from queue %s: %s", consumer.Queue.Name, retryErr.Error())
+		if retryErr := workers.DoWithRetries(service.Ctx, func(retry int) error {
+			if retry > 0 {
+				time.Sleep(service.rmq.Config.RetryDelay)
+			}
+
+			service.Logger.Info("Retrying to consume from RMQ queue %s #%d", consumer.Queue.Name, retry)
+			return service.Consume(consumer)
+		}, service.rmq.Config.RetryCount); retryErr != nil {
+			service.Logger.Error("Couldn't consume from queue %s: %s", consumer.Queue.Name, retryErr.Error())
+			workers.Sleep(service.Ctx, service.rmq.Config.RetryDelay)
+			continue
+		}
+
+		return
 	}
 }
 
