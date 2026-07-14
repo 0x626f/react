@@ -40,6 +40,10 @@ func (service *ConsumerService) Consume(consumer *Consumer) (err error) {
 		return
 	}
 
+	if _, err = service.rmq.CreateQueues(consumer.Queue); err != nil {
+		return err
+	}
+
 	var channel Channel
 	channel, err = service.rmq.Channel()
 	if err != nil {

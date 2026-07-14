@@ -65,6 +65,18 @@ func (producer *ProducerService) Bind(exchange *Exchange) {
 	producer.exchange = exchange
 }
 
+func (producer *ProducerService) ensureExchange() error {
+	producer.mu.Lock()
+	exchange := producer.exchange
+	producer.mu.Unlock()
+
+	if exchange == nil || exchange.Name == "" {
+		return nil
+	}
+
+	return producer.rmq.CreateExchange(exchange)
+}
+
 func (producer *ProducerService) requestContext() (context.Context, context.CancelFunc) {
 	if producer.requestTimeout > 0 {
 		return context.WithTimeout(producer.rmq.Ctx, producer.requestTimeout)
@@ -183,11 +195,17 @@ func (producer *ProducerService) closeChannel() error {
 }
 
 func (producer *ProducerService) Produce(publication *Publication) (err error) {
-	if producer.exchange == nil {
-		return
+	if err = producer.ensureExchange(); err != nil {
+		return err
 	}
 
 	producer.mu.Lock()
+
+	exchange := producer.exchange
+	if exchange == nil {
+		producer.mu.Unlock()
+		return
+	}
 
 	ctx, cancel := producer.requestContext()
 
@@ -200,7 +218,7 @@ func (producer *ProducerService) Produce(publication *Publication) (err error) {
 
 	err = producer.channel.PublishWithContext(
 		ctx,
-		producer.exchange.Name,
+		exchange.Name,
 		publication.Destination,
 		publication.Mandatary,
 		publication.Immediate,
