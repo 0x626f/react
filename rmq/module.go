@@ -16,10 +16,11 @@ func ProvideModuleConfig(config *ModuleConfig) gioc.IProvider {
 }
 
 type ModuleConfig struct {
-	Host     string `env:"RMQ_HOST"`
-	Port     int    `env:"RMQ_PORT"`
-	User     string `env:"RMQ_USER"`
-	Password string `env:"RMQ_PASSWORD"`
+	Host        string `env:"RMQ_HOST"`
+	Port        int    `env:"RMQ_PORT"`
+	User        string `env:"RMQ_USER"`
+	Password    string `env:"RMQ_PASSWORD"`
+	VirtualHost string `env:"RMQ_VIRTUAL_HOST"`
 
 	RetryCount int           `env:"RMQ_CONNECTION_RETRY_COUNT"`
 	RetryDelay time.Duration `env:"RMQ_CONNECTION_RETRY_DELAY"`
@@ -33,6 +34,10 @@ func (config *ModuleConfig) buildConnectionUrl() string {
 
 	if config.User != "" && config.Password != "" {
 		connection.User = neturl.UserPassword(config.User, config.Password)
+	}
+	if config.VirtualHost != "" {
+		connection.Path = "/" + config.VirtualHost
+		connection.RawPath = "/" + neturl.PathEscape(config.VirtualHost)
 	}
 
 	return connection.String()

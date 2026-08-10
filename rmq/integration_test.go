@@ -7,6 +7,7 @@ import (
 	neturl "net/url"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -532,6 +533,47 @@ func moduleConfigFromURL(t *testing.T, rawURL string) *ModuleConfig {
 		config.User = parsed.User.Username()
 		config.Password, _ = parsed.User.Password()
 	}
+	if parsed.Path != "" {
+		config.VirtualHost = strings.TrimPrefix(parsed.Path, "/")
+	}
 
 	return config
+}
+
+func TestModuleConfigFromURLVirtualHost(t *testing.T) {
+	tests := []struct {
+		name            string
+		rawURL          string
+		wantVirtualHost string
+	}{
+		{
+			name:            "absent path",
+			rawURL:          "amqp://guest:guest@localhost:5672",
+			wantVirtualHost: "",
+		},
+		{
+			name:            "named virtual host",
+			rawURL:          "amqp://guest:guest@localhost:5672/operator",
+			wantVirtualHost: "operator",
+		},
+		{
+			name:            "encoded root virtual host",
+			rawURL:          "amqp://guest:guest@localhost:5672/%2F",
+			wantVirtualHost: "/",
+		},
+		{
+			name:            "encoded slash in virtual host",
+			rawURL:          "amqp://guest:guest@localhost:5672/team%2Fblue",
+			wantVirtualHost: "team/blue",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config := moduleConfigFromURL(t, test.rawURL)
+			if config.VirtualHost != test.wantVirtualHost {
+				t.Fatalf("moduleConfigFromURL(%q).VirtualHost = %q, want %q", test.rawURL, config.VirtualHost, test.wantVirtualHost)
+			}
+		})
+	}
 }

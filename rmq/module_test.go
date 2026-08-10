@@ -7,21 +7,64 @@ import (
 
 	"github.com/0x626f/gioc"
 	"github.com/0x626f/react"
+	"github.com/rabbitmq/amqp091-go"
 )
 
 func TestModuleConfigBuildConnectionUrl(t *testing.T) {
 	tests := []struct {
-		name   string
-		config ModuleConfig
-		want   string
+		name      string
+		config    ModuleConfig
+		wantURL   string
+		wantVhost string
 	}{
 		{
-			name: "host and port only",
+			name: "empty virtual host",
 			config: ModuleConfig{
 				Host: "localhost",
 				Port: 5672,
 			},
-			want: "amqp://localhost:5672",
+			wantURL:   "amqp://localhost:5672",
+			wantVhost: "/",
+		},
+		{
+			name: "named virtual host",
+			config: ModuleConfig{
+				Host:        "localhost",
+				Port:        5672,
+				VirtualHost: "operator",
+			},
+			wantURL:   "amqp://localhost:5672/operator",
+			wantVhost: "operator",
+		},
+		{
+			name: "default virtual host",
+			config: ModuleConfig{
+				Host:        "localhost",
+				Port:        5672,
+				VirtualHost: "/",
+			},
+			wantURL:   "amqp://localhost:5672/%2F",
+			wantVhost: "/",
+		},
+		{
+			name: "virtual host containing slash",
+			config: ModuleConfig{
+				Host:        "localhost",
+				Port:        5672,
+				VirtualHost: "team/blue",
+			},
+			wantURL:   "amqp://localhost:5672/team%2Fblue",
+			wantVhost: "team/blue",
+		},
+		{
+			name: "virtual host containing spaces and reserved characters",
+			config: ModuleConfig{
+				Host:        "localhost",
+				Port:        5672,
+				VirtualHost: "ops team?prod#1%",
+			},
+			wantURL:   "amqp://localhost:5672/ops%20team%3Fprod%231%25",
+			wantVhost: "ops team?prod#1%",
 		},
 		{
 			name: "credentials are escaped",
@@ -31,7 +74,8 @@ func TestModuleConfigBuildConnectionUrl(t *testing.T) {
 				User:     "test user",
 				Password: "p@ss:word",
 			},
-			want: "amqp://test%20user:p%40ss%3Aword@rabbitmq.local:5672",
+			wantURL:   "amqp://test%20user:p%40ss%3Aword@rabbitmq.local:5672",
+			wantVhost: "/",
 		},
 		{
 			name: "ipv6 host",
@@ -39,7 +83,8 @@ func TestModuleConfigBuildConnectionUrl(t *testing.T) {
 				Host: "::1",
 				Port: 5672,
 			},
-			want: "amqp://[::1]:5672",
+			wantURL:   "amqp://[::1]:5672",
+			wantVhost: "/",
 		},
 		{
 			name: "partial credentials are ignored",
@@ -48,14 +93,24 @@ func TestModuleConfigBuildConnectionUrl(t *testing.T) {
 				Port: 5672,
 				User: "guest",
 			},
-			want: "amqp://localhost:5672",
+			wantURL:   "amqp://localhost:5672",
+			wantVhost: "/",
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := test.config.buildConnectionUrl(); got != test.want {
-				t.Fatalf("buildConnectionUrl() = %q, want %q", got, test.want)
+			got := test.config.buildConnectionUrl()
+			if got != test.wantURL {
+				t.Fatalf("buildConnectionUrl() = %q, want %q", got, test.wantURL)
+			}
+
+			parsed, err := amqp091.ParseURI(got)
+			if err != nil {
+				t.Fatalf("ParseURI(%q): %v", got, err)
+			}
+			if parsed.Vhost != test.wantVhost {
+				t.Fatalf("ParseURI(%q).Vhost = %q, want %q", got, parsed.Vhost, test.wantVhost)
 			}
 		})
 	}

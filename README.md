@@ -180,6 +180,14 @@ import (
     "github.com/rabbitmq/amqp091-go"
 )
 
+var rabbitMQConfig = &rmq.ModuleConfig{
+    Host:        "localhost",
+    Port:        5672,
+    User:        "guest",
+    Password:    "guest",
+    VirtualHost: "operator",
+}
+
 func publish(container *gioc.Container) error {
     producer, err := gioc.Get[*rmq.ProducerService](container, rmq.ProducerServiceToken)
     if err != nil {
@@ -213,6 +221,8 @@ func publish(container *gioc.Container) error {
 ```
 
 Provide `rmq.ModuleConfigToken` with `ProvideModuleConfig` or a config derivation before adding `rmq.Module`.
+`ModuleConfig.VirtualHost` is loaded from `RMQ_VIRTUAL_HOST`; leave it empty to use RabbitMQ's default `/` virtual host.
+The example above connects to the `operator` virtual host.
 
 ## PostgreSQL Example
 
