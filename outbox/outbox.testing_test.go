@@ -17,16 +17,18 @@ import (
 	"unicode/utf8"
 )
 
-// testStore is the aggregate portable contract exercised by runStoreContract.
-type testStore interface {
+// ITestStore is the aggregate portable contract exercised by runStoreContract.
+// It exists only in the package's test build.
+type ITestStore interface {
 	IAppender
 	IDeliveryStore
 	IReader
 	IMaintenanceStore
 }
 
-// testTimeDriver exposes authoritative adapter time and bounded advancement.
-type testTimeDriver interface {
+// ITestTimeDriver exposes authoritative adapter time and bounded advancement.
+// It exists only in the package's test build.
+type ITestTimeDriver interface {
 	Now(ctx context.Context) (time.Time, error)
 	Elapse(ctx context.Context, duration time.Duration) error
 }
@@ -46,8 +48,8 @@ type testCapabilities struct {
 
 // testHarness is one isolated conformance-test instance.
 type testHarness struct {
-	Store        testStore
-	Time         testTimeDriver
+	Store        ITestStore
+	Time         ITestTimeDriver
 	Capabilities testCapabilities
 }
 
@@ -1029,7 +1031,7 @@ const (
 
 // testFaultStore decorates a portable store with bounded named failures.
 type testFaultStore struct {
-	Store  testStore
+	Store  ITestStore
 	mu     sync.Mutex
 	faults map[string]*testFault
 }
@@ -1039,7 +1041,7 @@ type testFault struct {
 }
 
 // newTestFaultStore constructs a fault decorator with no active faults.
-func newTestFaultStore(store testStore) *testFaultStore {
+func newTestFaultStore(store ITestStore) *testFaultStore {
 	return &testFaultStore{Store: store, faults: make(map[string]*testFault)}
 }
 

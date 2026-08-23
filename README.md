@@ -168,6 +168,79 @@ func modules() []*gioc.Module {
 
 `reactredis.ConfigToken` must be provided with a `*redis.Config` containing `URL`, usually through `RegisterConfigModule`.
 
+### Redis Streams Feature
+
+Redis Streams is opt-in. Provide both configurations and select the feature;
+`StreamsServiceToken` is not registered by the base `redis.Module`.
+
+```go
+streamsConfig := reactredis.DefaultStreamsConfig()
+streamsConfig.WorkerCount = 8
+streamsConfig.ChannelSize = 128
+
+configModule := gioc.NewModule("RedisConfig").Global().Provide(
+    reactredis.ProvideConfig(&reactredis.Config{URL: "redis://localhost:6379/0"}),
+    reactredis.ProvideStreamsConfig(&streamsConfig),
+)
+
+redisModule := reactredis.ForFeature(reactredis.Streams)
+```
+
+Publish JSON values and consume them through a bounded manual-acknowledgement
+channel:
+
+```go
+type OrderCreated struct {
+    OrderID string `json:"order_id"`
+}
+
+func runOrderConsumer(ctx context.Context, container *gioc.Container) error {
+    streams, err := gioc.Get[*reactredis.StreamsService](
+        container,
+        reactredis.StreamsServiceToken,
+    )
+    if err != nil {
+        return err
+    }
+
+    messages, err := streams.Consume(
+        ctx,
+        "billing",
+        "orders",
+        reactredis.StreamsConsumerConfig{ConsumerCount: 2, BatchSize: 32},
+    )
+    if err != nil {
+        return err
+    }
+
+    for message := range messages {
+        var event OrderCreated
+        if err = message.Decode(&event); err != nil {
+            continue // no Ack: the pending message is retried
+        }
+        if err = chargeOrder(ctx, event); err != nil {
+            continue // no Ack: the pending message is retried
+        }
+        if err = streams.Ack(ctx, message); err != nil {
+            return err
+        }
+    }
+    return ctx.Err()
+}
+
+func publishOrder(ctx context.Context, streams *reactredis.StreamsService) error {
+    return streams.Publish(ctx, "orders", "order-42", OrderCreated{OrderID: "order-42"})
+}
+```
+
+The service starts exactly `WorkerCount` pool workers. A `Consume` subscription
+reserves `ConsumerCount` of them until its context is cancelled; requesting
+more than the remaining capacity returns `ErrStreamsWorkerCapacity`.
+Every returned channel has `ChannelSize` capacity. Unacknowledged entries are
+reclaimed after `ReclaimAfter`; after `MaximumDeliveries`, they are atomically
+acknowledged and copied to `<stream><DeadLetterSuffix>` (default `:dead`).
+`Publish` confirms `XADD`; persistence and replication are Redis server policy.
+
 ## RabbitMQ Example
 
 ```go
@@ -257,17 +330,27 @@ Provide `reactpostgres.ConfigToken` with a `*postgres.Config` containing `URL` b
 
 ```bash
 go test ./...
+just test-integration
+REACT_RACE=1 just test-integration
 ```
+
+`just test-integration` follows the `pgxext` integration flow: it creates
+isolated PostgreSQL, Redis, and RabbitMQ containers, requires every package's
+integration environment, writes coverage profiles under `.coverage`, and
+always removes the containers. Its 12-row Cartesian matrix exercises
+PostgreSQL 16/17/18, Redis 7.2/8.10, and RabbitMQ 4.2.9/4.3.5.
 
 ## Transactional Outbox
 
 The storage-independent outbox, adapters, worker pool, operational APIs, and
 production guidance are documented in [outbox/README.md](outbox/README.md).
 
-RabbitMQ integration tests are skipped unless `RMQ_TEST_URL` is set, for example:
+Direct integration-test runs skip when their service URL is absent. For example:
 
 ```bash
 RMQ_TEST_URL=amqp://guest:guest@localhost:5672 go test ./rmq -run Integration
+REDIS_TEST_URL=redis://localhost:6379/0 go test ./redis -run Integration
+POSTGRES_TEST_URL='postgres://postgres:postgres@localhost/react?sslmode=disable' go test ./postgres -run Integration
 ```
 
 ## License
