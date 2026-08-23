@@ -14,10 +14,7 @@ import (
 const redisTestURLVariable = "OUTBOX_REDIS_TEST_URL"
 
 func TestRedisStoreContract(t *testing.T) {
-	url := os.Getenv(redisTestURLVariable)
-	if url == "" {
-		t.Skipf("set %s to run Redis integration tests", redisTestURLVariable)
-	}
+	url := requireOutboxIntegrationURL(t, redisTestURLVariable, "Redis")
 	runStoreContract(t, func(t testing.TB) testHarness {
 		client, store := newRedisIntegrationStore(t, url)
 		t.Cleanup(func() { cleanupRedisNamespace(t, client, store.Keys()); _ = store.Close(); _ = client.Close() })
@@ -35,10 +32,7 @@ func TestRedisStoreContract(t *testing.T) {
 }
 
 func TestRedisScriptCacheReloadAndNoActiveTTL(t *testing.T) {
-	url := os.Getenv(redisTestURLVariable)
-	if url == "" {
-		t.Skipf("set %s to run Redis integration tests", redisTestURLVariable)
-	}
+	url := requireOutboxIntegrationURL(t, redisTestURLVariable, "Redis")
 	client, store := newRedisIntegrationStore(t, url)
 	t.Cleanup(func() { cleanupRedisNamespace(t, client, store.Keys()); _ = store.Close(); _ = client.Close() })
 	ctx := t.Context()
@@ -70,10 +64,7 @@ func TestRedisScriptCacheReloadAndNoActiveTTL(t *testing.T) {
 }
 
 func TestRedisDestinationFilteredClaim(t *testing.T) {
-	url := os.Getenv(redisTestURLVariable)
-	if url == "" {
-		t.Skipf("set %s to run Redis integration tests", redisTestURLVariable)
-	}
+	url := requireOutboxIntegrationURL(t, redisTestURLVariable, "Redis")
 	client, store := newRedisIntegrationStore(t, url)
 	t.Cleanup(func() { cleanupRedisNamespace(t, client, store.Keys()); _ = store.Close(); _ = client.Close() })
 	ctx := t.Context()
@@ -93,10 +84,7 @@ func TestRedisDestinationFilteredClaim(t *testing.T) {
 }
 
 func TestRedisPaginationRemainsFiniteAcrossConcurrentAppend(t *testing.T) {
-	url := os.Getenv(redisTestURLVariable)
-	if url == "" {
-		t.Skipf("set %s to run Redis integration tests", redisTestURLVariable)
-	}
+	url := requireOutboxIntegrationURL(t, redisTestURLVariable, "Redis")
 	client, store := newRedisIntegrationStore(t, url)
 	t.Cleanup(func() { cleanupRedisNamespace(t, client, store.Keys()); _ = store.Close(); _ = client.Close() })
 	ctx := t.Context()
@@ -135,10 +123,7 @@ func TestRedisPaginationRemainsFiniteAcrossConcurrentAppend(t *testing.T) {
 }
 
 func TestRedisScriptTypeValidationPrecedesWrites(t *testing.T) {
-	url := os.Getenv(redisTestURLVariable)
-	if url == "" {
-		t.Skipf("set %s to run Redis integration tests", redisTestURLVariable)
-	}
+	url := requireOutboxIntegrationURL(t, redisTestURLVariable, "Redis")
 	client, store := newRedisIntegrationStore(t, url)
 	t.Cleanup(func() { cleanupRedisNamespace(t, client, store.Keys()); _ = store.Close(); _ = client.Close() })
 	ctx := t.Context()
@@ -154,10 +139,7 @@ func TestRedisScriptTypeValidationPrecedesWrites(t *testing.T) {
 }
 
 func TestRedisDurabilityReport(t *testing.T) {
-	url := os.Getenv(redisTestURLVariable)
-	if url == "" {
-		t.Skipf("set %s to run Redis integration tests", redisTestURLVariable)
-	}
+	url := requireOutboxIntegrationURL(t, redisTestURLVariable, "Redis")
 	client, store := newRedisIntegrationStore(t, url)
 	t.Cleanup(func() { cleanupRedisNamespace(t, client, store.Keys()); _ = store.Close(); _ = client.Close() })
 	report, err := store.CheckDurability(t.Context())
@@ -170,10 +152,7 @@ func TestRedisDurabilityReport(t *testing.T) {
 }
 
 func TestRedisConnectionLossAndContextCancellation(t *testing.T) {
-	url := os.Getenv(redisTestURLVariable)
-	if url == "" {
-		t.Skipf("set %s to run Redis integration tests", redisTestURLVariable)
-	}
+	url := requireOutboxIntegrationURL(t, redisTestURLVariable, "Redis")
 	client, store := newRedisIntegrationStore(t, url)
 	t.Cleanup(func() { _ = store.Close(); _ = client.Close() })
 	ctx, cancel := context.WithCancel(context.Background())
@@ -193,10 +172,7 @@ func TestRedisConnectionLossAndContextCancellation(t *testing.T) {
 }
 
 func TestRedisAtomicRedisDomainComposition(t *testing.T) {
-	url := os.Getenv(redisTestURLVariable)
-	if url == "" {
-		t.Skipf("set %s to run Redis integration tests", redisTestURLVariable)
-	}
+	url := requireOutboxIntegrationURL(t, redisTestURLVariable, "Redis")
 	client, store := newRedisIntegrationStore(t, url)
 	t.Cleanup(func() { cleanupRedisNamespace(t, client, store.Keys()); _ = store.Close(); _ = client.Close() })
 	domainKey := "react:outbox:{" + store.Keys().Namespace() + "}:domain:order-1"

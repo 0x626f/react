@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	neturl "net/url"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,10 +17,7 @@ import (
 )
 
 func TestRmqIntegrationPublishConsume(t *testing.T) {
-	rawURL := os.Getenv("RMQ_TEST_URL")
-	if rawURL == "" {
-		t.Skip("set RMQ_TEST_URL, for example amqp://guest:guest@localhost:5672, to run RMQ integration test")
-	}
+	rawURL := requireRmqIntegrationURL(t)
 
 	config := moduleConfigFromURL(t, rawURL)
 	appModule := react.ApplicationModuleFor(react.ApplicationConfig{
@@ -104,10 +100,7 @@ func TestRmqIntegrationPublishConsume(t *testing.T) {
 }
 
 func TestRmqIntegrationManualAck(t *testing.T) {
-	rawURL := os.Getenv("RMQ_TEST_URL")
-	if rawURL == "" {
-		t.Skip("set RMQ_TEST_URL, for example amqp://guest:guest@localhost:5672, to run RMQ integration test")
-	}
+	rawURL := requireRmqIntegrationURL(t)
 
 	config := moduleConfigFromURL(t, rawURL)
 	appModule := react.ApplicationModuleFor(react.ApplicationConfig{
@@ -199,10 +192,7 @@ func TestRmqIntegrationManualAck(t *testing.T) {
 }
 
 func TestRmqIntegrationReconnectProducerAndConsumer(t *testing.T) {
-	rawURL := os.Getenv("RMQ_TEST_URL")
-	if rawURL == "" {
-		t.Skip("set RMQ_TEST_URL, for example amqp://guest:guest@localhost:5672, to run RMQ integration test")
-	}
+	rawURL := requireRmqIntegrationURL(t)
 
 	config := moduleConfigFromURL(t, rawURL)
 	config.RetryCount = 20
@@ -237,7 +227,8 @@ func TestRmqIntegrationReconnectProducerAndConsumer(t *testing.T) {
 		t.Fatalf("resolve rmq service: %v", err)
 	}
 	queue := &Queue{
-		Name: fmt.Sprintf("operator-rmq-reconnect-test-%d", time.Now().UnixNano()),
+		Name:    fmt.Sprintf("operator-rmq-reconnect-test-%d", time.Now().UnixNano()),
+		Durable: true,
 	}
 	if _, err := rmqService.CreateQueues(queue); err != nil {
 		t.Fatalf("create queue: %v", err)
@@ -302,10 +293,7 @@ func TestRmqIntegrationReconnectProducerAndConsumer(t *testing.T) {
 }
 
 func TestRmqIntegrationRepeatedConnectionClose(t *testing.T) {
-	rawURL := os.Getenv("RMQ_TEST_URL")
-	if rawURL == "" {
-		t.Skip("set RMQ_TEST_URL, for example amqp://guest:guest@localhost:5672, to run RMQ integration test")
-	}
+	rawURL := requireRmqIntegrationURL(t)
 
 	config := moduleConfigFromURL(t, rawURL)
 	config.RetryCount = 20
@@ -343,7 +331,8 @@ func TestRmqIntegrationRepeatedConnectionClose(t *testing.T) {
 	producer.Bind(&Exchange{})
 
 	queue := &Queue{
-		Name: fmt.Sprintf("operator-rmq-repeated-close-test-%d", time.Now().UnixNano()),
+		Name:    fmt.Sprintf("operator-rmq-repeated-close-test-%d", time.Now().UnixNano()),
+		Durable: true,
 	}
 	if _, err := rmqService.CreateQueues(queue); err != nil {
 		t.Fatalf("create queue: %v", err)

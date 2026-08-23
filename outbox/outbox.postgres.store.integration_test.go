@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -15,10 +14,7 @@ import (
 const postgresTestURLVariable = "OUTBOX_POSTGRES_TEST_URL"
 
 func TestPostgresStoreContract(t *testing.T) {
-	url := os.Getenv(postgresTestURLVariable)
-	if url == "" {
-		t.Skipf("set %s to run PostgreSQL integration tests", postgresTestURLVariable)
-	}
+	url := requireOutboxIntegrationURL(t, postgresTestURLVariable, "PostgreSQL")
 	runStoreContract(t, func(t testing.TB) testHarness {
 		pool, store, namespace := newPostgresIntegrationStore(t, url)
 		t.Cleanup(func() {
@@ -41,10 +37,7 @@ func TestPostgresStoreContract(t *testing.T) {
 }
 
 func TestPostgresTransactionBoundAppendCommitAndRollback(t *testing.T) {
-	url := os.Getenv(postgresTestURLVariable)
-	if url == "" {
-		t.Skipf("set %s to run PostgreSQL integration tests", postgresTestURLVariable)
-	}
+	url := requireOutboxIntegrationURL(t, postgresTestURLVariable, "PostgreSQL")
 	pool, store, namespace := newPostgresIntegrationStore(t, url)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -123,10 +116,7 @@ func TestPostgresTransactionBoundAppendCommitAndRollback(t *testing.T) {
 }
 
 func TestPostgresMigratedConstraintsRejectInvalidStateShape(t *testing.T) {
-	url := os.Getenv(postgresTestURLVariable)
-	if url == "" {
-		t.Skipf("set %s to run PostgreSQL integration tests", postgresTestURLVariable)
-	}
+	url := requireOutboxIntegrationURL(t, postgresTestURLVariable, "PostgreSQL")
 	pool, store, namespace := newPostgresIntegrationStore(t, url)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -150,10 +140,7 @@ func TestPostgresMigratedConstraintsRejectInvalidStateShape(t *testing.T) {
 }
 
 func TestPostgresSkipLockedAcrossConnections(t *testing.T) {
-	url := os.Getenv(postgresTestURLVariable)
-	if url == "" {
-		t.Skipf("set %s to run PostgreSQL integration tests", postgresTestURLVariable)
-	}
+	url := requireOutboxIntegrationURL(t, postgresTestURLVariable, "PostgreSQL")
 	pool, store, namespace := newPostgresIntegrationStore(t, url)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -189,10 +176,7 @@ func TestPostgresSkipLockedAcrossConnections(t *testing.T) {
 }
 
 func TestPostgresDueClaimQueryPlanUsesFocusedIndex(t *testing.T) {
-	url := os.Getenv(postgresTestURLVariable)
-	if url == "" {
-		t.Skipf("set %s to run PostgreSQL integration tests", postgresTestURLVariable)
-	}
+	url := requireOutboxIntegrationURL(t, postgresTestURLVariable, "PostgreSQL")
 	pool, store, namespace := newPostgresIntegrationStore(t, url)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
