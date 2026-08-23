@@ -25,7 +25,7 @@
 - environment-backed config registration and derived config providers
 - reusable base service structs for context, logger, and config injection
 - optional Redis, PostgreSQL, and RabbitMQ modules
-- a generic transactional outbox with inmemory, PostgreSQL, and Redis storage
+- a generic transactional outbox with PostgreSQL and Redis storage
 
 ## Installation
 

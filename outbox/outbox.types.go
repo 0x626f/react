@@ -290,8 +290,7 @@ func ValidateLeaseOwner(owner string, limits Limits) error {
 	return validateRequiredText("lease_owner", owner, limits.MaxLeaseOwnerBytes)
 }
 
-// ValidateLeaseToken checks an injected token generator's bounded output. The
-// default generator additionally provides cryptographic unpredictability.
+// ValidateLeaseToken checks the bounded shape of a generated lease token.
 func ValidateLeaseToken(token string, limits Limits) error {
 	limits = limits.withDefaults()
 	return validateRequiredText("lease_token", token, limits.MaxLeaseTokenBytes)
@@ -455,34 +454,18 @@ func ImmutableDigest(record NewRecord) string {
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
-// IDGeneratorFunc adapts a function to IIDGenerator.
-type IDGeneratorFunc func() (ID, error)
-
-func (f IDGeneratorFunc) NewID() (ID, error) { return f() }
-
-// TokenGeneratorFunc adapts a function to ITokenGenerator.
-type TokenGeneratorFunc func() (string, error)
-
-func (f TokenGeneratorFunc) NewToken() (string, error) { return f() }
-
-// CryptoIDGenerator returns a cryptographically random 128-bit ID generator.
-func CryptoIDGenerator() IIDGenerator {
-	return IDGeneratorFunc(func() (ID, error) {
-		var value [16]byte
-		if _, err := rand.Read(value[:]); err != nil {
-			return "", fmt.Errorf("generate outbox ID: %w", err)
-		}
-		return ID(hex.EncodeToString(value[:])), nil
-	})
+func generateID() (ID, error) {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", fmt.Errorf("generate outbox ID: %w", err)
+	}
+	return ID(hex.EncodeToString(value[:])), nil
 }
 
-// CryptoTokenGenerator returns a cryptographically random 256-bit token generator.
-func CryptoTokenGenerator() ITokenGenerator {
-	return TokenGeneratorFunc(func() (string, error) {
-		var value [32]byte
-		if _, err := rand.Read(value[:]); err != nil {
-			return "", fmt.Errorf("generate outbox lease token: %w", err)
-		}
-		return base64.RawURLEncoding.EncodeToString(value[:]), nil
-	})
+func generateLeaseToken() (string, error) {
+	var value [32]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", fmt.Errorf("generate outbox lease token: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(value[:]), nil
 }

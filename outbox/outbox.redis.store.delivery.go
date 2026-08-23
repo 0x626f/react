@@ -46,7 +46,7 @@ func (store *RedisStore) Claim(ctx context.Context, request ClaimRequest) ([]Rec
 	tokens := make([]string, request.Limit)
 	seenTokens := make(map[string]struct{}, request.Limit)
 	for index := range tokens {
-		token, err := store.config.TokenGenerator.NewToken()
+		token, err := generateLeaseToken()
 		if err != nil {
 			return nil, err
 		}

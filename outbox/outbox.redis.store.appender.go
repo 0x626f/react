@@ -49,7 +49,7 @@ func (store *RedisStore) prepareAppend(ctx context.Context, request AppendReques
 	wires := make([]wireRecord, len(request.Records))
 	for index, input := range request.Records {
 		if input.ID == "" {
-			input.ID, err = store.config.IDGenerator.NewID()
+			input.ID, err = generateID()
 			if err != nil {
 				return nil, "", err
 			}

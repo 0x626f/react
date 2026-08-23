@@ -1,8 +1,3 @@
-// InmemoryStore is the process-local reference implementation of the storage
-// contract. It is concurrency-safe and deterministic when given
-// deterministic clock and generators, but it is not durable: every record is
-// lost when the process stops. Use it for tests, examples, local development,
-// and applications that are explicitly ephemeral.
 package outbox
 
 import (
@@ -19,37 +14,38 @@ type entry struct {
 	completed *LeaseRef
 }
 
-// InmemoryStore is a concurrency-safe process-local
-type InmemoryStore struct {
+// memoryTestStore is a package-private fixture compiled only into tests. It
+// keeps service unit tests independent from external PostgreSQL or Redis.
+type memoryTestStore struct {
 	mu          sync.RWMutex
-	config      InmemoryConfig
+	config      memoryTestStoreConfig
 	records     map[ID]*entry
 	idempotency map[string]ID
 	closed      bool
 }
 
-// NewInmemoryStore validates and constructs a stopped process-local store.
-func NewInmemoryStore(config InmemoryConfig) (*InmemoryStore, error) {
+// newMemoryTestStore validates and constructs a test fixture.
+func newMemoryTestStore(config memoryTestStoreConfig) (*memoryTestStore, error) {
 	config, err := config.normalized()
 	if err != nil {
 		return nil, err
 	}
-	return &InmemoryStore{config: config, records: make(map[ID]*entry), idempotency: make(map[string]ID)}, nil
+	return &memoryTestStore{config: config, records: make(map[ID]*entry), idempotency: make(map[string]ID)}, nil
 }
 
-// Close marks this facade closed without owning any external resource.
-func (store *InmemoryStore) Close() error {
+// Close marks the fixture closed.
+func (store *memoryTestStore) Close() error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	store.closed = true
 	return nil
 }
 
-func (store *InmemoryStore) Append(ctx context.Context, records ...NewRecord) ([]Record, error) {
+func (store *memoryTestStore) Append(ctx context.Context, records ...NewRecord) ([]Record, error) {
 	return store.AppendBatch(ctx, AppendRequest{Records: records, DuplicateMode: store.config.DuplicateMode})
 }
 
-func (store *InmemoryStore) AppendBatch(ctx context.Context, request AppendRequest) ([]Record, error) {
+func (store *memoryTestStore) AppendBatch(ctx context.Context, request AppendRequest) ([]Record, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -59,11 +55,11 @@ func (store *InmemoryStore) AppendBatch(ctx context.Context, request AppendReque
 	if len(request.Records) > store.config.Limits.MaxBatchSize {
 		return nil, fmt.Errorf("%w: batch exceeds %d records", ErrInvalidArgument, store.config.Limits.MaxBatchSize)
 	}
-	now := CanonicalTime(store.config.Clock.Now())
+	now := CanonicalTime(time.Now())
 	prepared := make([]Record, len(request.Records))
 	for index, candidate := range request.Records {
 		if candidate.ID == "" {
-			id, err := store.config.IDGenerator.NewID()
+			id, err := generateID()
 			if err != nil {
 				return nil, err
 			}
@@ -130,7 +126,7 @@ func (store *InmemoryStore) AppendBatch(ctx context.Context, request AppendReque
 	return result, nil
 }
 
-func (store *InmemoryStore) lookupDuplicate(candidate Record) (Record, bool) {
+func (store *memoryTestStore) lookupDuplicate(candidate Record) (Record, bool) {
 	if existing := store.records[candidate.ID]; existing != nil {
 		return existing.record, true
 	}
@@ -144,7 +140,7 @@ func (store *InmemoryStore) lookupDuplicate(candidate Record) (Record, bool) {
 	return Record{}, false
 }
 
-func (store *InmemoryStore) Claim(ctx context.Context, request ClaimRequest) ([]Record, error) {
+func (store *memoryTestStore) Claim(ctx context.Context, request ClaimRequest) ([]Record, error) {
 	if err := store.validateClaim(request); err != nil {
 		return nil, err
 	}
@@ -154,7 +150,7 @@ func (store *InmemoryStore) Claim(ctx context.Context, request ClaimRequest) ([]
 	tokens := make([]string, request.Limit)
 	seenTokens := make(map[string]struct{}, request.Limit)
 	for index := range tokens {
-		token, err := store.config.TokenGenerator.NewToken()
+		token, err := generateLeaseToken()
 		if err != nil {
 			return nil, err
 		}
@@ -162,12 +158,12 @@ func (store *InmemoryStore) Claim(ctx context.Context, request ClaimRequest) ([]
 			return nil, err
 		}
 		if _, exists := seenTokens[token]; exists {
-			return nil, fmt.Errorf("%w: token generator returned a duplicate token", ErrInvalidArgument)
+			return nil, fmt.Errorf("%w: generated duplicate lease token", ErrInvalidArgument)
 		}
 		seenTokens[token] = struct{}{}
 		tokens[index] = token
 	}
-	now := CanonicalTime(store.config.Clock.Now())
+	now := CanonicalTime(time.Now())
 	leaseUntil := CanonicalTime(now.Add(request.LeaseDuration))
 	if err := ValidateTimestamp("lease_until", leaseUntil); err != nil {
 		return nil, err
@@ -228,7 +224,7 @@ func (store *InmemoryStore) Claim(ctx context.Context, request ClaimRequest) ([]
 	return claimed, nil
 }
 
-func (store *InmemoryStore) validateClaim(request ClaimRequest) error {
+func (store *memoryTestStore) validateClaim(request ClaimRequest) error {
 	if err := ValidateLeaseOwner(request.Owner, store.config.Limits); err != nil {
 		return err
 	}
@@ -255,7 +251,7 @@ func (store *InmemoryStore) validateClaim(request ClaimRequest) error {
 	return nil
 }
 
-func (store *InmemoryStore) recoverExpired(now time.Time, limit int) {
+func (store *memoryTestStore) recoverExpired(now time.Time, limit int) {
 	if limit == 0 {
 		limit = store.config.Limits.MaxClaimBatchSize
 	}
@@ -293,11 +289,11 @@ func (store *InmemoryStore) recoverExpired(now time.Time, limit int) {
 	}
 }
 
-func (store *InmemoryStore) Renew(ctx context.Context, lease LeaseRef, until time.Time) error {
+func (store *memoryTestStore) Renew(ctx context.Context, lease LeaseRef, until time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	now := CanonicalTime(store.config.Clock.Now())
+	now := CanonicalTime(time.Now())
 	until = CanonicalTime(until)
 	if err := ValidateTimestamp("lease_until", until); err != nil {
 		return err
@@ -319,11 +315,11 @@ func (store *InmemoryStore) Renew(ctx context.Context, lease LeaseRef, until tim
 	return nil
 }
 
-func (store *InmemoryStore) Acknowledge(ctx context.Context, lease LeaseRef, _ DeliveryResult) error {
+func (store *memoryTestStore) Acknowledge(ctx context.Context, lease LeaseRef, _ DeliveryResult) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	now := CanonicalTime(store.config.Clock.Now())
+	now := CanonicalTime(time.Now())
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if store.closed {
@@ -350,11 +346,11 @@ func (store *InmemoryStore) Acknowledge(ctx context.Context, lease LeaseRef, _ D
 	return nil
 }
 
-func (store *InmemoryStore) Retry(ctx context.Context, lease LeaseRef, retry RetryRequest) error {
+func (store *memoryTestStore) Retry(ctx context.Context, lease LeaseRef, retry RetryRequest) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	now := CanonicalTime(store.config.Clock.Now())
+	now := CanonicalTime(time.Now())
 	availableAt := CanonicalTime(retry.AvailableAt)
 	if err := ValidateTimestamp("available_at", availableAt); err != nil {
 		return err
@@ -386,11 +382,11 @@ func (store *InmemoryStore) Retry(ctx context.Context, lease LeaseRef, retry Ret
 	return nil
 }
 
-func (store *InmemoryStore) DeadLetter(ctx context.Context, lease LeaseRef, failure Failure) error {
+func (store *memoryTestStore) DeadLetter(ctx context.Context, lease LeaseRef, failure Failure) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	now := CanonicalTime(store.config.Clock.Now())
+	now := CanonicalTime(time.Now())
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if store.closed {
@@ -404,11 +400,11 @@ func (store *InmemoryStore) DeadLetter(ctx context.Context, lease LeaseRef, fail
 	return nil
 }
 
-func (store *InmemoryStore) Release(ctx context.Context, lease LeaseRef, availableAt time.Time) error {
+func (store *memoryTestStore) Release(ctx context.Context, lease LeaseRef, availableAt time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	now := CanonicalTime(store.config.Clock.Now())
+	now := CanonicalTime(time.Now())
 	availableAt = CanonicalTime(availableAt)
 	if err := ValidateTimestamp("available_at", availableAt); err != nil {
 		return err
@@ -437,7 +433,7 @@ func (store *InmemoryStore) Release(ctx context.Context, lease LeaseRef, availab
 	return nil
 }
 
-func (store *InmemoryStore) fenced(lease LeaseRef, now time.Time) (*entry, error) {
+func (store *memoryTestStore) fenced(lease LeaseRef, now time.Time) (*entry, error) {
 	if lease.ID == "" || lease.Owner == "" || lease.Token == "" || lease.Version == 0 {
 		return nil, ErrLeaseLost
 	}
@@ -464,7 +460,7 @@ func clearLease(record *Record) {
 	record.LeaseUntil = nil
 }
 
-func (store *InmemoryStore) Get(ctx context.Context, id ID) (Record, error) {
+func (store *memoryTestStore) Get(ctx context.Context, id ID) (Record, error) {
 	if err := ctx.Err(); err != nil {
 		return Record{}, err
 	}
@@ -483,7 +479,7 @@ func (store *InmemoryStore) Get(ctx context.Context, id ID) (Record, error) {
 	return current.record.Clone(), nil
 }
 
-func (store *InmemoryStore) Find(ctx context.Context, query Query) (Page, error) {
+func (store *memoryTestStore) Find(ctx context.Context, query Query) (Page, error) {
 	if err := ctx.Err(); err != nil {
 		return Page{}, err
 	}
@@ -581,14 +577,14 @@ func containsString(values []string, value string) bool {
 	return false
 }
 
-func (store *InmemoryStore) Cancel(ctx context.Context, id ID, reason string) error {
+func (store *memoryTestStore) Cancel(ctx context.Context, id ID, reason string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := ValidateID(id, store.config.Limits); err != nil {
 		return err
 	}
-	now := CanonicalTime(store.config.Clock.Now())
+	now := CanonicalTime(time.Now())
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if store.closed {
@@ -613,7 +609,7 @@ func (store *InmemoryStore) Cancel(ctx context.Context, id ID, reason string) er
 	return nil
 }
 
-func (store *InmemoryStore) Reschedule(ctx context.Context, id ID, availableAt time.Time) error {
+func (store *memoryTestStore) Reschedule(ctx context.Context, id ID, availableAt time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -624,7 +620,7 @@ func (store *InmemoryStore) Reschedule(ctx context.Context, id ID, availableAt t
 	if err := ValidateTimestamp("available_at", availableAt); err != nil {
 		return err
 	}
-	now := CanonicalTime(store.config.Clock.Now())
+	now := CanonicalTime(time.Now())
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if store.closed {
@@ -646,14 +642,14 @@ func (store *InmemoryStore) Reschedule(ctx context.Context, id ID, availableAt t
 	return nil
 }
 
-func (store *InmemoryStore) Requeue(ctx context.Context, id ID, options RequeueOptions) error {
+func (store *memoryTestStore) Requeue(ctx context.Context, id ID, options RequeueOptions) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := ValidateID(id, store.config.Limits); err != nil {
 		return err
 	}
-	now := CanonicalTime(store.config.Clock.Now())
+	now := CanonicalTime(time.Now())
 	availableAt := CanonicalTime(options.AvailableAt)
 	if availableAt.IsZero() {
 		availableAt = now
@@ -704,7 +700,7 @@ func (store *InmemoryStore) Requeue(ctx context.Context, id ID, options RequeueO
 	return nil
 }
 
-func (store *InmemoryStore) Purge(ctx context.Context, request PurgeRequest) (int, error) {
+func (store *memoryTestStore) Purge(ctx context.Context, request PurgeRequest) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
@@ -758,11 +754,11 @@ func terminalTime(record Record) *time.Time {
 	}
 }
 
-func (store *InmemoryStore) Backlog(ctx context.Context) (Backlog, error) {
+func (store *memoryTestStore) Backlog(ctx context.Context) (Backlog, error) {
 	if err := ctx.Err(); err != nil {
 		return Backlog{}, err
 	}
-	now := CanonicalTime(store.config.Clock.Now())
+	now := CanonicalTime(time.Now())
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 	if store.closed {
@@ -785,7 +781,7 @@ func (store *InmemoryStore) Backlog(ctx context.Context) (Backlog, error) {
 	return backlog, nil
 }
 
-func (store *InmemoryStore) Health(ctx context.Context) Health {
+func (store *memoryTestStore) Health(ctx context.Context) Health {
 	backlog, err := store.Backlog(ctx)
 	if err != nil {
 		return Health{Ready: false, StorageAvailable: !errors.Is(err, ErrClosed), DurabilitySafe: false, Message: err.Error()}
@@ -802,6 +798,6 @@ func stringSet(values []string) map[string]struct{} {
 	return result
 }
 
-var _ IStore = (*InmemoryStore)(nil)
-var _ IBacklogReader = (*InmemoryStore)(nil)
-var _ IHealthChecker = (*InmemoryStore)(nil)
+var _ IStore = (*memoryTestStore)(nil)
+var _ IBacklogReader = (*memoryTestStore)(nil)
+var _ IHealthChecker = (*memoryTestStore)(nil)

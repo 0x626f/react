@@ -29,8 +29,6 @@ const (
 	OutboxPostgresConfigToken gioc.Token = "OutboxPostgresConfig"
 	// OutboxRedisConfigToken is consumed by RedisStoreService.
 	OutboxRedisConfigToken gioc.Token = "OutboxRedisConfig"
-	// OutboxInmemoryConfigToken is consumed by InmemoryStoreService.
-	OutboxInmemoryConfigToken gioc.Token = "OutboxInmemoryConfig"
 )
 
 // ServiceInjections are the complete dependencies resolved by NewService.

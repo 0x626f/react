@@ -71,10 +71,6 @@ type IRetryPolicy interface {
 	Next(attempt int, failure error) (delay time.Duration, retry bool)
 }
 
-// IRandomSource makes retry jitter deterministic in tests. Implementations used
-// by a multi-worker service must be safe for concurrent calls.
-type IRandomSource interface{ Float64() float64 }
-
 // IHealthChecker reports readiness separately from backlog pressure. A large
 // backlog is observable but does not by itself make Ready false.
 type IHealthChecker interface {
@@ -85,20 +81,3 @@ type IHealthChecker interface {
 type IBacklogReader interface {
 	Backlog(ctx context.Context) (Backlog, error)
 }
-
-// IIDGenerator supplies IDs for append requests that omit one.
-type IIDGenerator interface{ NewID() (ID, error) }
-
-// ITokenGenerator supplies unguessable per-attempt lease tokens.
-type ITokenGenerator interface{ NewToken() (string, error) }
-
-// IClock makes orchestration time deterministic in tests.
-type IClock interface{ Now() time.Time }
-
-// ClockFunc adapts a function to IClock.
-type ClockFunc func() time.Time
-
-func (f ClockFunc) Now() time.Time { return f() }
-
-// SystemClock returns a wall clock; adapter boundaries canonicalize its values.
-func SystemClock() IClock { return ClockFunc(time.Now) }

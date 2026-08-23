@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// PostgresConfig selects namespace, validated identifiers, limits, and generators.
+// PostgresConfig selects namespace, validated identifiers, and limits.
 type PostgresConfig struct {
 	Namespace          string
 	Schema             string
@@ -15,8 +15,6 @@ type PostgresConfig struct {
 	DefaultMaxAttempts int
 	MaxLeaseDuration   time.Duration
 	Limits             Limits
-	IDGenerator        IIDGenerator
-	TokenGenerator     ITokenGenerator
 }
 
 // DefaultPostgresConfig returns adapter defaults for one shared table.
@@ -25,7 +23,6 @@ func DefaultPostgresConfig() PostgresConfig {
 		Namespace: "default", Schema: "react_outbox", Table: "records",
 		DuplicateMode: RejectDuplicate, DefaultMaxAttempts: 10,
 		MaxLeaseDuration: 5 * time.Minute, Limits: DefaultLimits(),
-		IDGenerator: CryptoIDGenerator(), TokenGenerator: CryptoTokenGenerator(),
 	}
 }
 
@@ -64,12 +61,6 @@ func (config PostgresConfig) normalized() (PostgresConfig, error) {
 	}
 	if config.MaxLeaseDuration < time.Microsecond {
 		return PostgresConfig{}, fmt.Errorf("%w: max lease duration", ErrInvalidArgument)
-	}
-	if config.IDGenerator == nil {
-		config.IDGenerator = defaults.IDGenerator
-	}
-	if config.TokenGenerator == nil {
-		config.TokenGenerator = defaults.TokenGenerator
 	}
 	return config, nil
 }

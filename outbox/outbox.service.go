@@ -96,7 +96,7 @@ func NewService(injections gioc.Injections) (*Service, error) {
 	}
 	owner := config.Owner
 	if owner == "" {
-		id, idErr := CryptoIDGenerator().NewID()
+		id, idErr := generateID()
 		if idErr != nil {
 			return nil, idErr
 		}
@@ -349,7 +349,7 @@ func (service *Service) deliver(deliveryRoot context.Context, record Record) {
 		<-renewDone
 		settleCtx, cancel := context.WithTimeout(context.Background(), service.settlementTimeout())
 		defer cancel()
-		if err := service.deliveryStore.Release(settleCtx, lease, CanonicalTime(service.config.Clock.Now())); err != nil && !errors.Is(err, ErrLeaseLost) {
+		if err := service.deliveryStore.Release(settleCtx, lease, CanonicalTime(time.Now())); err != nil && !errors.Is(err, ErrLeaseLost) {
 			service.logSettlementError("release", err, record.Destination)
 		}
 		return
@@ -402,7 +402,7 @@ func (service *Service) retryOrDeadLetter(ctx context.Context, record Record, ou
 		return
 	}
 	request := RetryRequest{
-		AvailableAt: CanonicalTime(service.config.Clock.Now().Add(delay)),
+		AvailableAt: CanonicalTime(time.Now().Add(delay)),
 		Failure:     failureFor(outcome, failure),
 	}
 	if err := service.deliveryStore.Retry(ctx, lease, request); err != nil {
@@ -414,7 +414,7 @@ func (service *Service) renew(ctx context.Context, cancelDelivery context.Cancel
 	defer close(done)
 	leaseUntil := *record.LeaseUntil
 	for {
-		delay := leaseUntil.Sub(service.config.Clock.Now()) - service.config.LeaseRenewalThreshold
+		delay := leaseUntil.Sub(time.Now()) - service.config.LeaseRenewalThreshold
 		if delay < time.Millisecond {
 			delay = time.Millisecond
 		}
@@ -430,7 +430,7 @@ func (service *Service) renew(ctx context.Context, cancelDelivery context.Cancel
 			return
 		case <-timer.C:
 		}
-		until := CanonicalTime(service.config.Clock.Now().Add(service.config.LeaseDuration))
+		until := CanonicalTime(time.Now().Add(service.config.LeaseDuration))
 		renewCtx, cancel := context.WithTimeout(ctx, minDuration(service.config.DeliveryTimeout, service.config.LeaseRenewalThreshold))
 		err := service.deliveryStore.Renew(renewCtx, record.LeaseRef(), until)
 		cancel()
@@ -507,7 +507,7 @@ func (service *Service) untrack(id ID) {
 }
 
 func (service *Service) releaseTracked(ctx context.Context, record Record) {
-	if err := service.deliveryStore.Release(ctx, record.LeaseRef(), CanonicalTime(service.config.Clock.Now())); err != nil && !errors.Is(err, ErrLeaseLost) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+	if err := service.deliveryStore.Release(ctx, record.LeaseRef(), CanonicalTime(time.Now())); err != nil && !errors.Is(err, ErrLeaseLost) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 		service.logSettlementError("release", err, record.Destination)
 	}
 	service.untrack(record.ID)

@@ -10,7 +10,7 @@ import (
 func TestExponentialBackoffBoundsAndAttempts(t *testing.T) {
 	policy, err := outbox.NewExponentialBackoff(outbox.ExponentialBackoffConfig{
 		Minimum: time.Second, Maximum: 5 * time.Second, Multiplier: 2,
-		Jitter: 1, MaxAttempts: 4, Random: constantRandom(0),
+		Jitter: 0, MaxAttempts: 4,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -25,7 +25,3 @@ func TestExponentialBackoffBoundsAndAttempts(t *testing.T) {
 		t.Fatal("maximum attempt was retried")
 	}
 }
-
-type constantRandom float64
-
-func (random constantRandom) Float64() float64 { return float64(random) }

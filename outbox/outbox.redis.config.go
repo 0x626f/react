@@ -17,8 +17,6 @@ type RedisConfig struct {
 	// MaxClaimResponseBytes bounds record data returned by one claim script.
 	MaxClaimResponseBytes int
 	Limits                Limits
-	IDGenerator           IIDGenerator
-	TokenGenerator        ITokenGenerator
 	DurabilityMode        RedisDurabilityMode
 	RequireNoEviction     bool
 	// AllowUnsafeEviction must be set deliberately to permit construction when
@@ -32,8 +30,7 @@ func DefaultRedisConfig() RedisConfig {
 		Namespace: "default", DuplicateMode: RejectDuplicate,
 		DefaultMaxAttempts: 10, MaxLeaseDuration: 5 * time.Minute,
 		MaxAppendEncodedBytes: 8 << 20, MaxClaimResponseBytes: 9 << 20,
-		Limits: DefaultLimits(), IDGenerator: CryptoIDGenerator(),
-		TokenGenerator: CryptoTokenGenerator(), DurabilityMode: RedisDurabilityWarn,
+		Limits: DefaultLimits(), DurabilityMode: RedisDurabilityWarn,
 		RequireNoEviction: true,
 	}
 }
@@ -83,12 +80,6 @@ func (config RedisConfig) normalized() (RedisConfig, error) {
 	claimMinimum := config.MaxAppendEncodedBytes + config.Limits.MaxLeaseOwnerBytes + config.Limits.MaxLeaseTokenBytes + 1024
 	if config.MaxClaimResponseBytes < claimMinimum || config.MaxClaimResponseBytes > 64<<20 {
 		return RedisConfig{}, fmt.Errorf("%w: max claim response bytes", ErrInvalidArgument)
-	}
-	if config.IDGenerator == nil {
-		config.IDGenerator = defaults.IDGenerator
-	}
-	if config.TokenGenerator == nil {
-		config.TokenGenerator = defaults.TokenGenerator
 	}
 	return config, nil
 }

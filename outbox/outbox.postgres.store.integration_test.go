@@ -1,4 +1,4 @@
-package outbox_test
+package outbox
 
 import (
 	"context"
@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/0x626f/react/outbox"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -21,7 +19,7 @@ func TestPostgresStoreContract(t *testing.T) {
 	if url == "" {
 		t.Skipf("set %s to run PostgreSQL integration tests", postgresTestURLVariable)
 	}
-	outbox.RunStoreContract(t, func(t testing.TB) outbox.TestHarness {
+	runStoreContract(t, func(t testing.TB) testHarness {
 		pool, store, namespace := newPostgresIntegrationStore(t, url)
 		t.Cleanup(func() {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -30,14 +28,14 @@ func TestPostgresStoreContract(t *testing.T) {
 			_ = store.Close()
 			pool.Close()
 		})
-		return outbox.TestHarness{
+		return testHarness{
 			Store: store,
-			Time: outbox.TestWallTimeDriver{NowFunc: func(ctx context.Context) (time.Time, error) {
+			Time: testWallTimeDriver{NowFunc: func(ctx context.Context) (time.Time, error) {
 				var now time.Time
 				err := pool.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now)
-				return outbox.CanonicalTime(now), err
+				return CanonicalTime(now), err
 			}},
-			Capabilities: outbox.TestCapabilities{AllQueryCombinations: true, SameResourceDomainComposition: true},
+			Capabilities: testCapabilities{AllQueryCombinations: true, SameResourceDomainComposition: true},
 		}
 	})
 }
@@ -70,7 +68,7 @@ func TestPostgresTransactionBoundAppendCommitAndRollback(t *testing.T) {
 	if _, err = tx.Exec(ctx, `INSERT INTO react_outbox.domain_state_test(namespace,id,value) VALUES($1,'rollback','value')`, namespace); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.Bind(tx).Append(ctx, outbox.TestRecord(outbox.TestWithID("rollback-outbox"))); err != nil {
+	if _, err = store.Bind(tx).Append(ctx, testRecord(testWithID("rollback-outbox"))); err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Rollback(ctx); err != nil {
@@ -85,7 +83,7 @@ func TestPostgresTransactionBoundAppendCommitAndRollback(t *testing.T) {
 	if _, err = tx.Exec(ctx, `INSERT INTO react_outbox.domain_state_test(namespace,id,value) VALUES($1,'commit','value')`, namespace); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.Bind(tx).Append(ctx, outbox.TestRecord(outbox.TestWithID("commit-outbox"))); err != nil {
+	if _, err = store.Bind(tx).Append(ctx, testRecord(testWithID("commit-outbox"))); err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -103,10 +101,10 @@ func TestPostgresTransactionBoundAppendCommitAndRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = store.Bind(tx).Append(ctx,
-		outbox.TestRecord(outbox.TestWithID("savepoint-must-rollback")),
-		outbox.TestRecord(outbox.TestWithID("commit-outbox")),
+		testRecord(testWithID("savepoint-must-rollback")),
+		testRecord(testWithID("commit-outbox")),
 	)
-	if !errors.Is(err, outbox.ErrDuplicateID) {
+	if !errors.Is(err, ErrDuplicateID) {
 		t.Fatalf("bound conflicting batch error = %v, want ErrDuplicateID", err)
 	}
 	if _, err = tx.Exec(ctx, `UPDATE react_outbox.domain_state_test SET value='after' WHERE namespace=$1 AND id='savepoint'`, namespace); err != nil {
@@ -119,7 +117,7 @@ func TestPostgresTransactionBoundAppendCommitAndRollback(t *testing.T) {
 	if err = pool.QueryRow(ctx, `SELECT COUNT(*) FROM react_outbox.domain_state_test WHERE namespace=$1 AND id='savepoint'`, namespace).Scan(&domainCount); err != nil || domainCount != 1 {
 		t.Fatalf("savepoint domain count = %d, %v; want 1", domainCount, err)
 	}
-	if _, err = store.Get(ctx, "savepoint-must-rollback"); !errors.Is(err, outbox.ErrNotFound) {
+	if _, err = store.Get(ctx, "savepoint-must-rollback"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("rejected bound batch left a row: %v", err)
 	}
 }
@@ -137,7 +135,7 @@ func TestPostgresMigratedConstraintsRejectInvalidStateShape(t *testing.T) {
 		_ = store.Close()
 		pool.Close()
 	})
-	if _, err := store.Append(t.Context(), outbox.TestRecord(outbox.TestWithID("constraint-record"))); err != nil {
+	if _, err := store.Append(t.Context(), testRecord(testWithID("constraint-record"))); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(t.Context(), `UPDATE react_outbox.records SET state='unknown' WHERE namespace=$1 AND id='constraint-record'`, namespace); err == nil {
@@ -165,8 +163,8 @@ func TestPostgresSkipLockedAcrossConnections(t *testing.T) {
 	})
 	ctx := t.Context()
 	if _, err := store.Append(ctx,
-		outbox.TestRecord(outbox.TestWithID("locked-a")),
-		outbox.TestRecord(outbox.TestWithID("locked-b")),
+		testRecord(testWithID("locked-a")),
+		testRecord(testWithID("locked-b")),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -175,13 +173,13 @@ func TestPostgresSkipLockedAcrossConnections(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lockingTx.Rollback(context.Background())
-	var locked outbox.ID
+	var locked ID
 	if err = lockingTx.QueryRow(ctx, `SELECT id FROM react_outbox.records
 		WHERE namespace=$1 AND state='pending' ORDER BY available_at,created_at,id
 		LIMIT 1 FOR UPDATE`, namespace).Scan(&locked); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.Claim(ctx, outbox.ClaimRequest{Owner: "other-connection", Limit: 2, LeaseDuration: time.Second})
+	claimed, err := store.Claim(ctx, ClaimRequest{Owner: "other-connection", Limit: 2, LeaseDuration: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,9 +200,9 @@ func TestPostgresDueClaimQueryPlanUsesFocusedIndex(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM react_outbox.records WHERE namespace=$1`, namespace)
 		pool.Close()
 	})
-	inputs := make([]outbox.NewRecord, 100)
+	inputs := make([]NewRecord, 100)
 	for index := range inputs {
-		inputs[index] = outbox.TestRecord(outbox.TestWithID(outbox.ID(fmt.Sprintf("plan-%03d", index))))
+		inputs[index] = testRecord(testWithID(ID(fmt.Sprintf("plan-%03d", index))))
 	}
 	if _, err := store.Append(t.Context(), inputs...); err != nil {
 		t.Fatal(err)
@@ -246,7 +244,7 @@ func TestPostgresDueClaimQueryPlanUsesFocusedIndex(t *testing.T) {
 	}
 }
 
-func newPostgresIntegrationStore(t testing.TB, url string) (*pgxpool.Pool, *outbox.PostgresStore, string) {
+func newPostgresIntegrationStore(t testing.TB, url string) (*pgxpool.Pool, *PostgresStore, string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -259,10 +257,9 @@ func newPostgresIntegrationStore(t testing.TB, url string) (*pgxpool.Pool, *outb
 		t.Fatalf("PostgreSQL Ping: %v", err)
 	}
 	namespace := fmt.Sprintf("test-%d", time.Now().UnixNano())
-	config := outbox.DefaultPostgresConfig()
+	config := DefaultPostgresConfig()
 	config.Namespace = namespace
-	config.TokenGenerator = outbox.NewTestSequenceGenerator("pg-lease")
-	store, err := outbox.NewPostgresStore(pool, config)
+	store, err := NewPostgresStore(pool, config)
 	if err != nil {
 		pool.Close()
 		t.Fatalf("NewPostgresStore: %v", err)
@@ -274,7 +271,7 @@ func newPostgresIntegrationStore(t testing.TB, url string) (*pgxpool.Pool, *outb
 	return pool, store, namespace
 }
 
-func assertCounts(t testing.TB, pool *pgxpool.Pool, store *outbox.PostgresStore, namespace, domainID string, recordID outbox.ID, want int) {
+func assertCounts(t testing.TB, pool *pgxpool.Pool, store *PostgresStore, namespace, domainID string, recordID ID, want int) {
 	t.Helper()
 	var count int
 	if err := pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM react_outbox.domain_state_test WHERE namespace=$1 AND id=$2`, namespace, domainID).Scan(&count); err != nil {

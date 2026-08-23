@@ -25,10 +25,8 @@ type Config struct {
 	Retry                 ExponentialBackoffConfig
 	Limits                Limits
 
-	// These dependencies are optional. The service supplies production defaults
-	// when they are nil. They are exposed here for deterministic tests and
-	// application-specific delivery policy.
-	Clock           IClock
+	// These dependencies are optional application delivery policies. The service
+	// supplies production defaults when they are nil.
 	RetryPolicy     IRetryPolicy
 	ErrorClassifier IErrorClassifier
 	Owner           string
@@ -59,7 +57,6 @@ func DefaultConfig() Config {
 			Jitter: .2, MaxAttempts: 10,
 		},
 		Limits: limits,
-		Clock:  SystemClock(),
 	}
 }
 
@@ -113,9 +110,6 @@ func (config Config) normalized() (Config, error) {
 	config.Limits = config.Limits.withDefaults()
 	if err := config.Validate(); err != nil {
 		return Config{}, err
-	}
-	if isNilValue(config.Clock) {
-		config.Clock = SystemClock()
 	}
 	if isNilValue(config.ErrorClassifier) {
 		config.ErrorClassifier = DefaultErrorClassifier()

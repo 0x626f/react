@@ -183,12 +183,6 @@ and broker connections remain owned by their infrastructure modules.
 
 ## Storage adapters
 
-### In-memory
-
-`outbox.InmemoryStore` is concurrency-safe and deterministic with injected
-clocks and generators. It is process-local and loses all records on shutdown.
-Use it for tests, examples, and explicitly ephemeral applications.
-
 ### PostgreSQL
 
 `outbox.PostgresStore` provides durable storage with `FOR UPDATE SKIP LOCKED`,

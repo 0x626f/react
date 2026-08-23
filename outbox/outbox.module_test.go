@@ -1,4 +1,4 @@
-package outbox_test
+package outbox
 
 import (
 	"context"
@@ -10,12 +10,11 @@ import (
 	"github.com/0x626f/author"
 	"github.com/0x626f/gioc"
 	"github.com/0x626f/react"
-	"github.com/0x626f/react/outbox"
 )
 
-type moduleSink struct{ delivered chan outbox.Record }
+type moduleSink struct{ delivered chan Record }
 
-func (sink *moduleSink) Deliver(ctx context.Context, record outbox.Record) error {
+func (sink *moduleSink) Deliver(ctx context.Context, record Record) error {
 	select {
 	case sink.delivered <- record.Clone():
 		return nil
@@ -25,16 +24,15 @@ func (sink *moduleSink) Deliver(ctx context.Context, record outbox.Record) error
 }
 
 func TestForFeatureInitializesServiceAndProvidesCapabilities(t *testing.T) {
-	storeConfig := outbox.DefaultInmemoryConfig()
+	store := newServiceStore(t)
 	workerConfig := moduleServiceConfig()
-	configModule := gioc.NewModule("OutboxModuleTestConfig").Provide(outbox.ProvideInmemoryConfig(storeConfig))
-	featureModule := outbox.ForFeature(outbox.Inmemory, workerConfig).Import(configModule)
+	featureModule := ForFeature(moduleTestStoreFeature(store), workerConfig)
 	container, application := runOutboxContainer(t, featureModule)
 	var shutdownOnce sync.Once
 	shutdown := func() { shutdownOnce.Do(application.Shutdown) }
 	t.Cleanup(shutdown)
 
-	service, err := gioc.Get[*outbox.Service](container, outbox.OutboxServiceToken, featureModule)
+	service, err := gioc.Get[*Service](container, OutboxServiceToken, featureModule)
 	if err != nil {
 		t.Fatalf("resolve outbox Service = %v", err)
 	}
@@ -44,30 +42,27 @@ func TestForFeatureInitializesServiceAndProvidesCapabilities(t *testing.T) {
 	if service.Logger == nil {
 		t.Fatal("outbox Service did not resolve ILogger")
 	}
-	storeService, err := gioc.Get[*outbox.InmemoryStoreService](container, outbox.OutboxStoreToken, featureModule)
+	resolvedStore, err := gioc.Get[IStore](container, OutboxStoreToken, featureModule)
 	if err != nil {
-		t.Fatalf("resolve inmemory StoreService = %v", err)
+		t.Fatalf("resolve module store = %v", err)
 	}
-	if service.IStore != storeService {
-		t.Fatal("Service did not receive the module StoreService")
-	}
-	if storeService.Logger == nil {
-		t.Fatal("StoreService did not resolve ILogger")
+	if service.IStore != resolvedStore || resolvedStore != store {
+		t.Fatal("Service did not receive the module store")
 	}
 
-	appender, err := gioc.Get[outbox.IAppender](container, outbox.OutboxAppenderToken, featureModule)
+	appender, err := gioc.Get[IAppender](container, OutboxAppenderToken, featureModule)
 	if err != nil {
 		t.Fatalf("resolve IAppender = %v", err)
 	}
-	reader, err := gioc.Get[outbox.IReader](container, outbox.OutboxReaderToken, featureModule)
+	reader, err := gioc.Get[IReader](container, OutboxReaderToken, featureModule)
 	if err != nil {
 		t.Fatalf("resolve IReader = %v", err)
 	}
-	deliveryStore, err := gioc.Get[outbox.IDeliveryStore](container, outbox.OutboxDeliveryStoreToken, featureModule)
+	deliveryStore, err := gioc.Get[IDeliveryStore](container, OutboxDeliveryStoreToken, featureModule)
 	if err != nil {
 		t.Fatalf("resolve IDeliveryStore = %v", err)
 	}
-	maintenance, err := gioc.Get[outbox.IMaintenanceStore](container, outbox.OutboxMaintenanceStoreToken, featureModule)
+	maintenance, err := gioc.Get[IMaintenanceStore](container, OutboxMaintenanceStoreToken, featureModule)
 	if err != nil {
 		t.Fatalf("resolve IMaintenanceStore = %v", err)
 	}
@@ -75,11 +70,11 @@ func TestForFeatureInitializesServiceAndProvidesCapabilities(t *testing.T) {
 		t.Fatal("capability providers must expose the outbox Service")
 	}
 
-	sink := &moduleSink{delivered: make(chan outbox.Record, 1)}
-	if err = service.Register(sink, outbox.DestinationsConfig{Destinations: []string{"orders.confirmed"}}); err != nil {
+	sink := &moduleSink{delivered: make(chan Record, 1)}
+	if err = service.Register(sink, DestinationsConfig{Destinations: []string{"orders.confirmed"}}); err != nil {
 		t.Fatal(err)
 	}
-	records, err := appender.Append(t.Context(), outbox.NewRecord{
+	records, err := appender.Append(t.Context(), NewRecord{
 		ID: "module-record", Destination: "orders.confirmed",
 		MessageType: "order.confirmed", Payload: []byte(`{"order_id":"42"}`),
 	})
@@ -87,7 +82,7 @@ func TestForFeatureInitializesServiceAndProvidesCapabilities(t *testing.T) {
 		t.Fatalf("Append() = %v", err)
 	}
 	assertSinkRecord(t, sink.delivered, records[0].ID)
-	waitForModuleState(t, reader, records[0].ID, outbox.StateDelivered)
+	waitForModuleState(t, reader, records[0].ID, StateDelivered)
 
 	shutdown()
 	select {
@@ -95,75 +90,69 @@ func TestForFeatureInitializesServiceAndProvidesCapabilities(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("outbox Service did not stop with ApplicationService")
 	}
-	if _, err = storeService.Get(context.Background(), records[0].ID); !errors.Is(err, outbox.ErrClosed) {
-		t.Fatalf("StoreService.Get() after shutdown = %v, want ErrClosed", err)
+	if _, err = store.Get(context.Background(), records[0].ID); !errors.Is(err, ErrClosed) {
+		t.Fatalf("store.Get() after shutdown = %v, want ErrClosed", err)
 	}
 }
 
 func TestForFeatureRoutesMultipleDestinationsThroughOneWorkerPool(t *testing.T) {
-	configModule := gioc.NewModule("OutboxMultipleRoutesTestConfig").Provide(
-		outbox.ProvideInmemoryConfig(outbox.DefaultInmemoryConfig()),
-	)
-	featureModule := outbox.ForFeature(outbox.Inmemory, moduleServiceConfig()).Import(configModule)
+	store := newServiceStore(t)
+	featureModule := ForFeature(moduleTestStoreFeature(store), moduleServiceConfig())
 	container, application := runOutboxContainer(t, featureModule)
 	t.Cleanup(application.Shutdown)
-	service, err := gioc.Get[*outbox.Service](container, outbox.OutboxServiceToken, featureModule)
+	service, err := gioc.Get[*Service](container, OutboxServiceToken, featureModule)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ordersSink := &moduleSink{delivered: make(chan outbox.Record, 1)}
-	auditSink := &moduleSink{delivered: make(chan outbox.Record, 1)}
-	if err = service.Register(ordersSink, outbox.DestinationsConfig{Destinations: []string{"orders.confirmed"}}); err != nil {
+	ordersSink := &moduleSink{delivered: make(chan Record, 1)}
+	auditSink := &moduleSink{delivered: make(chan Record, 1)}
+	if err = service.Register(ordersSink, DestinationsConfig{Destinations: []string{"orders.confirmed"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err = service.Register(auditSink, outbox.DestinationsConfig{Destinations: []string{"audit.created"}}); err != nil {
+	if err = service.Register(auditSink, DestinationsConfig{Destinations: []string{"audit.created"}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := service.Destinations(); len(got) != 2 || got[0] != "audit.created" || got[1] != "orders.confirmed" {
 		t.Fatalf("registered destinations = %v", got)
 	}
 	records, err := service.Append(t.Context(),
-		outbox.NewRecord{ID: "orders-module-record", Destination: "orders.confirmed", MessageType: "order.confirmed", Payload: []byte("order")},
-		outbox.NewRecord{ID: "audit-module-record", Destination: "audit.created", MessageType: "audit.created", Payload: []byte("audit")},
+		NewRecord{ID: "orders-module-record", Destination: "orders.confirmed", MessageType: "order.confirmed", Payload: []byte("order")},
+		NewRecord{ID: "audit-module-record", Destination: "audit.created", MessageType: "audit.created", Payload: []byte("audit")},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertSinkRecord(t, ordersSink.delivered, records[0].ID)
 	assertSinkRecord(t, auditSink.delivered, records[1].ID)
-	waitForModuleState(t, service, records[0].ID, outbox.StateDelivered)
-	waitForModuleState(t, service, records[1].ID, outbox.StateDelivered)
+	waitForModuleState(t, service, records[0].ID, StateDelivered)
+	waitForModuleState(t, service, records[1].ID, StateDelivered)
 }
 
-func TestAdapterFeatureValueUsesStoreService(t *testing.T) {
-	configModule := gioc.NewModule("OutboxAdapterFeatureTestConfig").Provide(
-		gioc.ValueProvider(outbox.OutboxInmemoryConfigToken, outbox.DefaultInmemoryConfig(), true),
-	)
-	featureModule := outbox.ForFeature(outbox.Inmemory).Import(configModule)
-	container, application := runOutboxContainer(t, featureModule)
-	t.Cleanup(application.Shutdown)
-	if _, err := gioc.Get[*outbox.InmemoryStoreService](container, outbox.OutboxStoreToken, featureModule); err != nil {
-		t.Fatalf("resolve inmemory StoreService = %v", err)
-	}
-}
-
-func TestForFeatureRejectsNilStoreConfig(t *testing.T) {
-	configModule := gioc.NewModule("OutboxNilConfigTestConfig").Provide(
-		gioc.ValueProvider(outbox.OutboxInmemoryConfigToken, (*outbox.InmemoryConfig)(nil), true),
-	)
-	featureModule := outbox.ForFeature(outbox.Inmemory).Import(configModule)
+func TestForFeatureRejectsNilStore(t *testing.T) {
+	feature := DefineStoreFeature("nil-test", func(token gioc.Token) gioc.IProvider {
+		return gioc.FactoryProvider(token, gioc.NewFactory(nil, gioc.Singleton, func(gioc.Injections) (IStore, error) {
+			return (*memoryTestStore)(nil), nil
+		}), true)
+	})
+	featureModule := ForFeature(feature)
 	applicationModule := react.ApplicationModuleFor(react.ApplicationConfig{Parent: context.Background()})
 	container := gioc.NewContainer()
 	if err := container.AddModules(applicationModule, testLoggerModule(), featureModule); err != nil {
 		t.Fatal(err)
 	}
-	if err := container.Run(); !errors.Is(err, outbox.ErrInvalidArgument) {
+	if err := container.Run(); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("Run() = %v, want ErrInvalidArgument", err)
 	}
 }
 
-func moduleServiceConfig() outbox.Config {
-	config := outbox.DefaultConfig()
+func moduleTestStoreFeature(store IStore) StoreFeature {
+	return DefineStoreFeature("module-test", func(token gioc.Token) gioc.IProvider {
+		return gioc.ValueProvider(token, store, true)
+	})
+}
+
+func moduleServiceConfig() Config {
+	config := DefaultConfig()
 	config.WorkerCount = 2
 	config.ClaimBatchSize = 2
 	config.LeaseDuration = 500 * time.Millisecond
@@ -200,7 +189,7 @@ func runOutboxContainer(t testing.TB, featureModule *gioc.Module) (*gioc.Contain
 	return container, application
 }
 
-func waitForModuleState(t testing.TB, reader outbox.IReader, id outbox.ID, state outbox.State) {
+func waitForModuleState(t testing.TB, reader IReader, id ID, state State) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -219,7 +208,7 @@ func waitForModuleState(t testing.TB, reader outbox.IReader, id outbox.ID, state
 	}
 }
 
-func assertSinkRecord(t testing.TB, records <-chan outbox.Record, id outbox.ID) {
+func assertSinkRecord(t testing.TB, records <-chan Record, id ID) {
 	t.Helper()
 	select {
 	case record := <-records:

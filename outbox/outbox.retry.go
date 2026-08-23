@@ -3,17 +3,9 @@ package outbox
 import (
 	"fmt"
 	"math"
-	"math/rand"
-	"sync"
+	"math/rand/v2"
 	"time"
 )
-
-type lockedRandom struct {
-	mu     sync.Mutex
-	random *rand.Rand
-}
-
-func (r *lockedRandom) Float64() float64 { r.mu.Lock(); defer r.mu.Unlock(); return r.random.Float64() }
 
 // ExponentialBackoffConfig configures bounded exponential retry delays.
 type ExponentialBackoffConfig struct {
@@ -22,7 +14,6 @@ type ExponentialBackoffConfig struct {
 	Multiplier  float64
 	Jitter      float64
 	MaxAttempts int
-	Random      IRandomSource
 }
 
 // ExponentialBackoff implements bounded exponential delay with optional jitter.
@@ -45,9 +36,6 @@ func NewExponentialBackoff(config ExponentialBackoffConfig) (*ExponentialBackoff
 	if config.MaxAttempts <= 0 {
 		return nil, invalid("retry.max_attempts", "must be positive")
 	}
-	if config.Random == nil {
-		config.Random = &lockedRandom{random: rand.New(rand.NewSource(time.Now().UnixNano()))}
-	}
 	return &ExponentialBackoff{config: config}, nil
 }
 
@@ -62,7 +50,7 @@ func (policy *ExponentialBackoff) Next(attempt int, _ error) (time.Duration, boo
 		delayFloat = float64(policy.config.Maximum)
 	}
 	if policy.config.Jitter > 0 {
-		factor := 1 - policy.config.Jitter + 2*policy.config.Jitter*policy.config.Random.Float64()
+		factor := 1 - policy.config.Jitter + 2*policy.config.Jitter*rand.Float64()
 		delayFloat *= factor
 	}
 	if delayFloat > float64(policy.config.Maximum) {

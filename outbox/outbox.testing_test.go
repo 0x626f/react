@@ -1,8 +1,7 @@
 package outbox
 
-// This file intentionally does not end in _test.go. It is public, reusable
-// adapter conformance support compiled into package outbox for third-party
-// adapter authors. Application runtime code must not use these test helpers.
+// Package-local conformance helpers live only in the test build. Production
+// structures and services do not expose or depend on them.
 
 import (
 	"bytes"
@@ -18,23 +17,23 @@ import (
 	"unicode/utf8"
 )
 
-// ITestStore is the aggregate portable contract exercised by RunStoreContract.
-type ITestStore interface {
+// testStore is the aggregate portable contract exercised by runStoreContract.
+type testStore interface {
 	IAppender
 	IDeliveryStore
 	IReader
 	IMaintenanceStore
 }
 
-// ITestTimeDriver exposes authoritative adapter time and bounded advancement.
-type ITestTimeDriver interface {
+// testTimeDriver exposes authoritative adapter time and bounded advancement.
+type testTimeDriver interface {
 	Now(ctx context.Context) (time.Time, error)
 	Elapse(ctx context.Context, duration time.Duration) error
 }
 
-// TestCapabilities declares genuine optional adapter behavior. It never
+// testCapabilities declares genuine optional adapter behavior. It never
 // disables required state, fencing, append, or portable query checks.
-type TestCapabilities struct {
+type testCapabilities struct {
 	// AllQueryCombinations enables checks beyond the required portable query
 	// subset (ID, state, created-time, deterministic created ordering).
 	AllQueryCombinations bool
@@ -45,31 +44,31 @@ type TestCapabilities struct {
 	Parallel                      bool
 }
 
-// TestHarness is one isolated conformance-test instance.
-type TestHarness struct {
-	Store        ITestStore
-	Time         ITestTimeDriver
-	Capabilities TestCapabilities
+// testHarness is one isolated conformance-test instance.
+type testHarness struct {
+	Store        testStore
+	Time         testTimeDriver
+	Capabilities testCapabilities
 }
 
-// TestStoreFactory constructs a fresh harness and registers cleanup on t.
-type TestStoreFactory func(t testing.TB) TestHarness
+// testStoreFactory constructs a fresh harness and registers cleanup on t.
+type testStoreFactory func(t testing.TB) testHarness
 
-// RunStoreContract runs the portable first-party storage contract. The factory
+// runStoreContract runs the portable first-party storage contract. The factory
 // is called inside every subtest and must return a completely isolated store
 // and register all cleanup with t.Cleanup.
 //
 // A third-party adapter normally invokes it from an external test package:
 //
 //	func TestStoreContract(t *testing.T) {
-//		outbox.RunStoreContract(t, func(t testing.TB) outbox.TestHarness {
+//		outbox.runStoreContract(t, func(t testing.TB) outbox.testHarness {
 //			store, timeDriver := newIsolatedStore(t)
-//			return outbox.TestHarness{Store: store, Time: timeDriver}
+//			return outbox.testHarness{Store: store, Time: timeDriver}
 //		})
 //	}
-func RunStoreContract(t *testing.T, factory TestStoreFactory) {
+func runStoreContract(t *testing.T, factory testStoreFactory) {
 	t.Helper()
-	run := func(name string, test func(*testing.T, TestHarness)) {
+	run := func(name string, test func(*testing.T, testHarness)) {
 		t.Run(name, func(t *testing.T) {
 			harness := factory(t)
 			if harness.Store == nil {
@@ -103,10 +102,10 @@ func RunStoreContract(t *testing.T, factory TestStoreFactory) {
 	run("closed_store", testContractClosedStore)
 }
 
-func testContractValidationAndAtomicBatch(t *testing.T, harness TestHarness) {
+func testContractValidationAndAtomicBatch(t *testing.T, harness testHarness) {
 	ctx := context.Background()
-	valid := TestRecord(TestWithID("valid-batch-record"))
-	invalidRecord := TestRecord(TestWithID("invalid-batch-record"))
+	valid := testRecord(testWithID("valid-batch-record"))
+	invalidRecord := testRecord(testWithID("invalid-batch-record"))
 	invalidRecord.Destination = ""
 	if _, err := harness.Store.Append(ctx, valid, invalidRecord); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("Append invalid batch error = %v, want ErrInvalidArgument", err)
@@ -114,19 +113,19 @@ func testContractValidationAndAtomicBatch(t *testing.T, harness TestHarness) {
 	if _, err := harness.Store.Get(ctx, valid.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("valid member of rejected batch exists or Get error = %v", err)
 	}
-	if _, err := harness.Store.Append(ctx, TestRecord(TestWithID("valid-record"))); err != nil {
+	if _, err := harness.Store.Append(ctx, testRecord(testWithID("valid-record"))); err != nil {
 		t.Fatalf("Append valid record: %v", err)
 	}
-	invalidUTF8 := TestRecord(TestWithID("invalid-utf8"))
+	invalidUTF8 := testRecord(testWithID("invalid-utf8"))
 	invalidUTF8.MessageType = string([]byte{0xff})
 	if _, err := harness.Store.Append(ctx, invalidUTF8); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("Append invalid UTF-8 error = %v, want ErrInvalidArgument", err)
 	}
-	invalidHeader := TestRecord(TestWithID("invalid-header"), TestWithHeader("secret", "value\x00suffix"))
+	invalidHeader := testRecord(testWithID("invalid-header"), testWithHeader("secret", "value\x00suffix"))
 	if _, err := harness.Store.Append(ctx, invalidHeader); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("Append NUL header error = %v, want ErrInvalidArgument", err)
 	}
-	tooLate := TestRecord(TestWithID("invalid-time"), TestWithAvailableAt(time.UnixMicro(MaximumTimestampUnixMicro).Add(time.Microsecond)))
+	tooLate := testRecord(testWithID("invalid-time"), testWithAvailableAt(time.UnixMicro(MaximumTimestampUnixMicro).Add(time.Microsecond)))
 	if _, err := harness.Store.Append(ctx, tooLate); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("Append out-of-range timestamp error = %v, want ErrInvalidArgument", err)
 	}
@@ -135,9 +134,9 @@ func testContractValidationAndAtomicBatch(t *testing.T, harness TestHarness) {
 	}
 }
 
-func testContractDuplicates(t *testing.T, harness TestHarness) {
+func testContractDuplicates(t *testing.T, harness testHarness) {
 	ctx := context.Background()
-	record := TestRecord(TestWithID("duplicate-record"), TestWithIdempotencyKey("duplicate-key"))
+	record := testRecord(testWithID("duplicate-record"), testWithIdempotencyKey("duplicate-key"))
 	first, err := harness.Store.Append(ctx, record)
 	if err != nil {
 		t.Fatalf("first Append: %v", err)
@@ -147,7 +146,7 @@ func testContractDuplicates(t *testing.T, harness TestHarness) {
 	}
 	batchAppender, ok := harness.Store.(IBatchAppender)
 	if !ok {
-		t.Fatal("first-party ITestStore must implement IBatchAppender")
+		t.Fatal("first-party testStore must implement IBatchAppender")
 	}
 	identical, err := batchAppender.AppendBatch(ctx, AppendRequest{Records: []NewRecord{record}, DuplicateMode: AcceptIdentical})
 	if err != nil {
@@ -161,7 +160,7 @@ func testContractDuplicates(t *testing.T, harness TestHarness) {
 	if _, err = batchAppender.AppendBatch(ctx, AppendRequest{Records: []NewRecord{conflict}, DuplicateMode: AcceptIdentical}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("conflicting duplicate error = %v, want ErrConflict", err)
 	}
-	atomicNew := TestRecord(TestWithID("must-not-partially-append"))
+	atomicNew := testRecord(testWithID("must-not-partially-append"))
 	if _, err = batchAppender.AppendBatch(ctx, AppendRequest{Records: []NewRecord{atomicNew, conflict}, DuplicateMode: AcceptIdentical}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("atomic conflicting batch error = %v, want ErrConflict", err)
 	}
@@ -173,7 +172,7 @@ func testContractDuplicates(t *testing.T, harness TestHarness) {
 	results := make(chan error, callers)
 	for range callers {
 		go func() {
-			_, appendErr := batchAppender.AppendBatch(ctx, AppendRequest{Records: []NewRecord{TestRecord(TestWithID("concurrent-duplicate"))}, DuplicateMode: AcceptIdentical})
+			_, appendErr := batchAppender.AppendBatch(ctx, AppendRequest{Records: []NewRecord{testRecord(testWithID("concurrent-duplicate"))}, DuplicateMode: AcceptIdentical})
 			results <- appendErr
 		}()
 	}
@@ -189,7 +188,7 @@ func testContractDuplicates(t *testing.T, harness TestHarness) {
 		payload := payload
 		go func() {
 			<-start
-			_, appendErr := batchAppender.AppendBatch(ctx, AppendRequest{Records: []NewRecord{TestRecord(TestWithID("concurrent-conflict"), TestWithPayload(payload))}, DuplicateMode: AcceptIdentical})
+			_, appendErr := batchAppender.AppendBatch(ctx, AppendRequest{Records: []NewRecord{testRecord(testWithID("concurrent-conflict"), testWithPayload(payload))}, DuplicateMode: AcceptIdentical})
 			conflictingResults <- appendErr
 		}()
 	}
@@ -210,9 +209,9 @@ func testContractDuplicates(t *testing.T, harness TestHarness) {
 	}
 }
 
-func testContractCopyIsolation(t *testing.T, harness TestHarness) {
+func testContractCopyIsolation(t *testing.T, harness testHarness) {
 	ctx := context.Background()
-	input := TestRecord(TestWithID("copy-record"), TestWithPayload([]byte("original")), TestWithHeader("trace", "one"))
+	input := testRecord(testWithID("copy-record"), testWithPayload([]byte("original")), testWithHeader("trace", "one"))
 	created, err := harness.Store.Append(ctx, input)
 	if err != nil {
 		t.Fatal(err)
@@ -239,16 +238,16 @@ func testContractCopyIsolation(t *testing.T, harness TestHarness) {
 	}
 }
 
-func testContractPagination(t *testing.T, harness TestHarness) {
+func testContractPagination(t *testing.T, harness testHarness) {
 	ctx := context.Background()
 	now, err := harness.Time.Now(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	inputs := []NewRecord{
-		TestRecord(TestWithID("page-c"), TestWithAvailableAt(now)),
-		TestRecord(TestWithID("page-a"), TestWithAvailableAt(now)),
-		TestRecord(TestWithID("page-b"), TestWithAvailableAt(now)),
+		testRecord(testWithID("page-c"), testWithAvailableAt(now)),
+		testRecord(testWithID("page-a"), testWithAvailableAt(now)),
+		testRecord(testWithID("page-b"), testWithAvailableAt(now)),
 	}
 	if _, err = harness.Store.Append(ctx, inputs...); err != nil {
 		t.Fatal(err)
@@ -296,15 +295,15 @@ func testContractPagination(t *testing.T, harness TestHarness) {
 	}
 }
 
-func testContractQueryCapabilities(t *testing.T, harness TestHarness) {
+func testContractQueryCapabilities(t *testing.T, harness testHarness) {
 	ctx := context.Background()
 	now, err := harness.Time.Now(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	created, err := harness.Store.Append(ctx,
-		TestRecord(TestWithID("query-alpha"), TestWithDestination("alpha"), TestWithMessageType("alpha.created"), TestWithAggregate("order", "one"), TestWithOrderingKey("order-one"), TestWithIdempotencyKey("query-alpha-key"), TestWithAvailableAt(now.Add(time.Hour))),
-		TestRecord(TestWithID("query-beta"), TestWithDestination("beta"), TestWithMessageType("beta.created"), TestWithAggregate("order", "two"), TestWithOrderingKey("order-two"), TestWithIdempotencyKey("query-beta-key"), TestWithAvailableAt(now.Add(2*time.Hour))),
+		testRecord(testWithID("query-alpha"), testWithDestination("alpha"), testWithMessageType("alpha.created"), testWithAggregate("order", "one"), testWithOrderingKey("order-one"), testWithIdempotencyKey("query-alpha-key"), testWithAvailableAt(now.Add(time.Hour))),
+		testRecord(testWithID("query-beta"), testWithDestination("beta"), testWithMessageType("beta.created"), testWithAggregate("order", "two"), testWithOrderingKey("order-two"), testWithIdempotencyKey("query-beta-key"), testWithAvailableAt(now.Add(2*time.Hour))),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -337,9 +336,9 @@ func testContractQueryCapabilities(t *testing.T, harness TestHarness) {
 	}
 }
 
-func testContractClaimAcknowledge(t *testing.T, harness TestHarness) {
+func testContractClaimAcknowledge(t *testing.T, harness testHarness) {
 	ctx := context.Background()
-	if _, err := harness.Store.Append(ctx, TestRecord(TestWithID("ack-record"))); err != nil {
+	if _, err := harness.Store.Append(ctx, testRecord(testWithID("ack-record"))); err != nil {
 		t.Fatal(err)
 	}
 	claimed := testClaimOne(t, harness, "worker-a", time.Minute)
@@ -364,7 +363,7 @@ func testContractClaimAcknowledge(t *testing.T, harness TestHarness) {
 	if err := harness.Store.Acknowledge(ctx, differentCompletion, DeliveryResult{}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("different completed Acknowledge = %v, want ErrConflict", err)
 	}
-	delivered := TestRequireState(t, harness.Store, claimed.ID, StateDelivered)
+	delivered := testRequireState(t, harness.Store, claimed.ID, StateDelivered)
 	if delivered.DeliveredAt == nil || delivered.LeaseToken != "" {
 		t.Fatalf("delivered record = %#v", delivered)
 	}
@@ -373,16 +372,16 @@ func testContractClaimAcknowledge(t *testing.T, harness TestHarness) {
 	}
 }
 
-func testContractSettlements(t *testing.T, harness TestHarness) {
+func testContractSettlements(t *testing.T, harness testHarness) {
 	ctx := context.Background()
 	now, err := harness.Time.Now(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = harness.Store.Append(ctx,
-		TestRecord(TestWithID("retry-record"), TestWithMaxAttempts(3)),
-		TestRecord(TestWithID("release-record"), TestWithMaxAttempts(3)),
-		TestRecord(TestWithID("dead-record"), TestWithMaxAttempts(3)),
+		testRecord(testWithID("retry-record"), testWithMaxAttempts(3)),
+		testRecord(testWithID("release-record"), testWithMaxAttempts(3)),
+		testRecord(testWithID("dead-record"), testWithMaxAttempts(3)),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -404,24 +403,24 @@ func testContractSettlements(t *testing.T, harness TestHarness) {
 	if err = harness.Store.DeadLetter(ctx, byID["dead-record"].LeaseRef(), Failure{Code: "terminal", Message: "do not retry"}); err != nil {
 		t.Fatal(err)
 	}
-	TestRequireState(t, harness.Store, "retry-record", StatePending)
-	TestRequireState(t, harness.Store, "release-record", StatePending)
-	dead := TestRequireState(t, harness.Store, "dead-record", StateDead)
+	testRequireState(t, harness.Store, "retry-record", StatePending)
+	testRequireState(t, harness.Store, "release-record", StatePending)
+	dead := testRequireState(t, harness.Store, "dead-record", StateDead)
 	if dead.DeadAt == nil || dead.LastErrorCode != "terminal" {
 		t.Fatalf("dead record = %#v", dead)
 	}
 }
 
-func testContractIllegalTransitions(t *testing.T, harness TestHarness) {
+func testContractIllegalTransitions(t *testing.T, harness testHarness) {
 	ctx := context.Background()
 	now, err := harness.Time.Now(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := harness.Store.Append(ctx,
-		TestRecord(TestWithID("illegal-pending")),
-		TestRecord(TestWithID("illegal-leased")),
-		TestRecord(TestWithID("illegal-dead")),
+		testRecord(testWithID("illegal-pending")),
+		testRecord(testWithID("illegal-leased")),
+		testRecord(testWithID("illegal-dead")),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -493,15 +492,15 @@ func testContractIllegalTransitions(t *testing.T, harness TestHarness) {
 	}
 }
 
-func testContractAttemptExhaustion(t *testing.T, harness TestHarness) {
+func testContractAttemptExhaustion(t *testing.T, harness testHarness) {
 	ctx := context.Background()
 	now, err := harness.Time.Now(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = harness.Store.Append(ctx,
-		TestRecord(TestWithID("retry-exhausted"), TestWithMaxAttempts(1)),
-		TestRecord(TestWithID("release-exhausted"), TestWithMaxAttempts(1)),
+		testRecord(testWithID("retry-exhausted"), testWithMaxAttempts(1)),
+		testRecord(testWithID("release-exhausted"), testWithMaxAttempts(1)),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -520,7 +519,7 @@ func testContractAttemptExhaustion(t *testing.T, harness TestHarness) {
 		t.Fatal(err)
 	}
 	for _, id := range []ID{"retry-exhausted", "release-exhausted"} {
-		record := TestRequireState(t, harness.Store, id, StateDead)
+		record := testRequireState(t, harness.Store, id, StateDead)
 		if record.Attempts != 1 {
 			t.Errorf("%q attempts = %d, want 1", id, record.Attempts)
 		}
@@ -531,7 +530,7 @@ func testContractAttemptExhaustion(t *testing.T, harness TestHarness) {
 			t.Errorf("Requeue exhausted %q with reset: %v", id, err)
 		}
 	}
-	if _, err = harness.Store.Append(ctx, TestRecord(TestWithID("expiry-exhausted"), TestWithDestination("expiry-only"), TestWithMaxAttempts(1))); err != nil {
+	if _, err = harness.Store.Append(ctx, testRecord(testWithID("expiry-exhausted"), testWithDestination("expiry-only"), testWithMaxAttempts(1))); err != nil {
 		t.Fatal(err)
 	}
 	expiring, err := harness.Store.Claim(ctx, ClaimRequest{Owner: "expiry-worker", Limit: 1, LeaseDuration: 50 * time.Millisecond, Destinations: []string{"expiry-only"}})
@@ -545,51 +544,51 @@ func testContractAttemptExhaustion(t *testing.T, harness TestHarness) {
 	if err != nil || len(recovered) != 0 {
 		t.Fatalf("exhausted expiry recovery claimed %#v, %v", recovered, err)
 	}
-	TestRequireState(t, harness.Store, "expiry-exhausted", StateDead)
+	testRequireState(t, harness.Store, "expiry-exhausted", StateDead)
 }
 
-func testContractLeaseExpiry(t *testing.T, harness TestHarness) {
+func testContractLeaseExpiry(t *testing.T, harness testHarness) {
 	ctx := context.Background()
-	if _, err := harness.Store.Append(ctx, TestRecord(TestWithID("lease-record"), TestWithMaxAttempts(3))); err != nil {
+	if _, err := harness.Store.Append(ctx, testRecord(testWithID("lease-record"), testWithMaxAttempts(3))); err != nil {
 		t.Fatal(err)
 	}
-	claimed := testClaimOne(t, harness, "old-worker", 2*time.Second)
+	claimed := testClaimOne(t, harness, "old-worker", 100*time.Millisecond)
 	now, err := harness.Time.Now(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = harness.Store.Renew(ctx, claimed.LeaseRef(), now.Add(4*time.Second)); err != nil {
+	if err = harness.Store.Renew(ctx, claimed.LeaseRef(), now.Add(250*time.Millisecond)); err != nil {
 		t.Fatalf("Renew: %v", err)
 	}
-	if err = harness.Time.Elapse(ctx, 3*time.Second); err != nil {
+	if err = harness.Time.Elapse(ctx, 150*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 	if err = harness.Store.Acknowledge(ctx, claimed.LeaseRef(), DeliveryResult{}); err != nil {
 		t.Fatalf("acknowledge renewed lease: %v", err)
 	}
 
-	if _, err = harness.Store.Append(ctx, TestRecord(TestWithID("expired-record"), TestWithMaxAttempts(3))); err != nil {
+	if _, err = harness.Store.Append(ctx, testRecord(testWithID("expired-record"), testWithMaxAttempts(3))); err != nil {
 		t.Fatal(err)
 	}
-	expired := testClaimOne(t, harness, "stale-worker", time.Second)
-	if err = harness.Time.Elapse(ctx, 2*time.Second); err != nil {
+	expired := testClaimOne(t, harness, "stale-worker", 50*time.Millisecond)
+	if err = harness.Time.Elapse(ctx, 100*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 	if err = harness.Store.Acknowledge(ctx, expired.LeaseRef(), DeliveryResult{}); !errors.Is(err, ErrLeaseLost) {
 		t.Fatalf("expired Acknowledge = %v", err)
 	}
-	reclaimed := testClaimOne(t, harness, "new-worker", time.Second)
+	reclaimed := testClaimOne(t, harness, "new-worker", 100*time.Millisecond)
 	if reclaimed.ID != expired.ID || reclaimed.LeaseToken == expired.LeaseToken || reclaimed.Version == expired.Version {
 		t.Fatalf("reclaimed record did not receive a fresh fence: old=%#v new=%#v", expired, reclaimed)
 	}
 }
 
-func testContractConcurrentClaimers(t *testing.T, harness TestHarness) {
+func testContractConcurrentClaimers(t *testing.T, harness testHarness) {
 	ctx := context.Background()
 	const count = 20
 	inputs := make([]NewRecord, 0, count)
 	for index := range count {
-		inputs = append(inputs, TestRecord(TestWithID(ID(fmt.Sprintf("claim-%02d", index)))))
+		inputs = append(inputs, testRecord(testWithID(ID(fmt.Sprintf("claim-%02d", index)))))
 	}
 	if _, err := harness.Store.Append(ctx, inputs...); err != nil {
 		t.Fatal(err)
@@ -620,17 +619,17 @@ func testContractConcurrentClaimers(t *testing.T, harness TestHarness) {
 	}
 }
 
-func testContractMaintenance(t *testing.T, harness TestHarness) {
+func testContractMaintenance(t *testing.T, harness testHarness) {
 	ctx := context.Background()
 	now, err := harness.Time.Now(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = harness.Store.Append(ctx,
-		TestRecord(TestWithID("cancel-record")),
-		TestRecord(TestWithID("cancel-record-two")),
-		TestRecord(TestWithID("reschedule-record")),
-		TestRecord(TestWithID("requeue-record")),
+		testRecord(testWithID("cancel-record")),
+		testRecord(testWithID("cancel-record-two")),
+		testRecord(testWithID("reschedule-record")),
+		testRecord(testWithID("requeue-record")),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -658,7 +657,7 @@ func testContractMaintenance(t *testing.T, harness TestHarness) {
 	if err = harness.Store.Reschedule(ctx, "reschedule-record", now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	rescheduled := TestRequireState(t, harness.Store, "reschedule-record", StatePending)
+	rescheduled := testRequireState(t, harness.Store, "reschedule-record", StatePending)
 	if !rescheduled.AvailableAt.Equal(CanonicalTime(now.Add(time.Hour))) {
 		t.Fatalf("AvailableAt = %v", rescheduled.AvailableAt)
 	}
@@ -681,11 +680,11 @@ func testContractMaintenance(t *testing.T, harness TestHarness) {
 	if err = harness.Store.Requeue(ctx, "requeue-record", RequeueOptions{AvailableAt: now, ResetAttempts: true}); err != nil {
 		t.Fatal(err)
 	}
-	requeued := TestRequireState(t, harness.Store, "requeue-record", StatePending)
+	requeued := testRequireState(t, harness.Store, "requeue-record", StatePending)
 	if requeued.Attempts != 0 || requeued.LastErrorCode != "" {
 		t.Fatalf("requeued record = %#v", requeued)
 	}
-	if err = harness.Time.Elapse(ctx, time.Second); err != nil {
+	if err = harness.Time.Elapse(ctx, 10*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 	after, err := harness.Time.Now(ctx)
@@ -711,10 +710,10 @@ func testContractMaintenance(t *testing.T, harness TestHarness) {
 	}
 }
 
-func testContractContextCancellation(t *testing.T, harness TestHarness) {
+func testContractContextCancellation(t *testing.T, harness testHarness) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := harness.Store.Append(ctx, TestRecord(TestWithID("cancelled-context"))); !errors.Is(err, context.Canceled) {
+	if _, err := harness.Store.Append(ctx, testRecord(testWithID("cancelled-context"))); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Append cancelled context = %v", err)
 	}
 	if _, err := harness.Store.Find(ctx, Query{}); !errors.Is(err, context.Canceled) {
@@ -722,7 +721,7 @@ func testContractContextCancellation(t *testing.T, harness TestHarness) {
 	}
 }
 
-func testContractUnsupportedQuery(t *testing.T, harness TestHarness) {
+func testContractUnsupportedQuery(t *testing.T, harness testHarness) {
 	if harness.Capabilities.UnsupportedQuery == nil {
 		return
 	}
@@ -731,9 +730,9 @@ func testContractUnsupportedQuery(t *testing.T, harness TestHarness) {
 	}
 }
 
-func testContractFailureTextBounds(t *testing.T, harness TestHarness) {
+func testContractFailureTextBounds(t *testing.T, harness testHarness) {
 	ctx := context.Background()
-	if _, err := harness.Store.Append(ctx, TestRecord(TestWithID("bounded-failure"))); err != nil {
+	if _, err := harness.Store.Append(ctx, testRecord(testWithID("bounded-failure"))); err != nil {
 		t.Fatal(err)
 	}
 	claimed := testClaimOne(t, harness, "failure-worker", time.Minute)
@@ -742,7 +741,7 @@ func testContractFailureTextBounds(t *testing.T, harness TestHarness) {
 	if err := harness.Store.DeadLetter(ctx, claimed.LeaseRef(), failure); err != nil {
 		t.Fatal(err)
 	}
-	dead := TestRequireState(t, harness.Store, claimed.ID, StateDead)
+	dead := testRequireState(t, harness.Store, claimed.ID, StateDead)
 	if len(dead.LastErrorCode) > DefaultLimits().MaxErrorCodeBytes || len(dead.LastErrorMessage) > DefaultLimits().MaxErrorMessageBytes {
 		t.Fatalf("failure was not bounded: code=%d message=%d", len(dead.LastErrorCode), len(dead.LastErrorMessage))
 	}
@@ -751,7 +750,7 @@ func testContractFailureTextBounds(t *testing.T, harness TestHarness) {
 	}
 }
 
-func testContractClosedStore(t *testing.T, harness TestHarness) {
+func testContractClosedStore(t *testing.T, harness testHarness) {
 	closer, ok := harness.Store.(interface{ Close() error })
 	if !ok {
 		return
@@ -763,7 +762,7 @@ func testContractClosedStore(t *testing.T, harness TestHarness) {
 		t.Fatalf("second Close: %v", err)
 	}
 	ctx := context.Background()
-	if _, err := harness.Store.Append(ctx, TestRecord(TestWithID("after-close"))); !errors.Is(err, ErrClosed) {
+	if _, err := harness.Store.Append(ctx, testRecord(testWithID("after-close"))); !errors.Is(err, ErrClosed) {
 		t.Fatalf("Append after Close = %v, want ErrClosed", err)
 	}
 	if _, err := harness.Store.Append(ctx); !errors.Is(err, ErrClosed) {
@@ -777,7 +776,7 @@ func testContractClosedStore(t *testing.T, harness TestHarness) {
 	}
 }
 
-func testClaimOne(t testing.TB, harness TestHarness, owner string, duration time.Duration) Record {
+func testClaimOne(t testing.TB, harness testHarness, owner string, duration time.Duration) Record {
 	t.Helper()
 	records, err := harness.Store.Claim(context.Background(), ClaimRequest{Owner: owner, Limit: 1, LeaseDuration: duration})
 	if err != nil {
@@ -789,11 +788,11 @@ func testClaimOne(t testing.TB, harness TestHarness, owner string, duration time
 	return records[0]
 }
 
-// TestRecordOption customizes a record returned by TestRecord.
-type TestRecordOption func(*NewRecord)
+// testRecordOption customizes a record returned by testRecord.
+type testRecordOption func(*NewRecord)
 
-// TestRecord builds a valid record with a unique default ID.
-func TestRecord(options ...TestRecordOption) NewRecord {
+// testRecord builds a valid record with a unique default ID.
+func testRecord(options ...testRecordOption) NewRecord {
 	var random [12]byte
 	if _, err := rand.Read(random[:]); err != nil {
 		panic(fmt.Sprintf("generate test record ID: %v", err))
@@ -809,41 +808,41 @@ func TestRecord(options ...TestRecordOption) NewRecord {
 	return record
 }
 
-// TestWithID sets a test record ID.
-func TestWithID(id ID) TestRecordOption { return func(record *NewRecord) { record.ID = id } }
+// testWithID sets a test record ID.
+func testWithID(id ID) testRecordOption { return func(record *NewRecord) { record.ID = id } }
 
-// TestWithDestination sets a test destination.
-func TestWithDestination(value string) TestRecordOption {
+// testWithDestination sets a test destination.
+func testWithDestination(value string) testRecordOption {
 	return func(record *NewRecord) { record.Destination = value }
 }
 
-// TestWithMessageType sets a test message type.
-func TestWithMessageType(value string) TestRecordOption {
+// testWithMessageType sets a test message type.
+func testWithMessageType(value string) testRecordOption {
 	return func(record *NewRecord) { record.MessageType = value }
 }
 
-// TestWithAggregate sets test aggregate metadata.
-func TestWithAggregate(kind, id string) TestRecordOption {
+// testWithAggregate sets test aggregate metadata.
+func testWithAggregate(kind, id string) testRecordOption {
 	return func(record *NewRecord) { record.AggregateType, record.AggregateID = kind, id }
 }
 
-// TestWithOrderingKey sets a test ordering key.
-func TestWithOrderingKey(value string) TestRecordOption {
+// testWithOrderingKey sets a test ordering key.
+func testWithOrderingKey(value string) testRecordOption {
 	return func(record *NewRecord) { record.OrderingKey = value }
 }
 
-// TestWithIdempotencyKey sets a test idempotency key.
-func TestWithIdempotencyKey(value string) TestRecordOption {
+// testWithIdempotencyKey sets a test idempotency key.
+func testWithIdempotencyKey(value string) testRecordOption {
 	return func(record *NewRecord) { record.IdempotencyKey = value }
 }
 
-// TestWithPayload copies and sets a test payload.
-func TestWithPayload(value []byte) TestRecordOption {
+// testWithPayload copies and sets a test payload.
+func testWithPayload(value []byte) testRecordOption {
 	return func(record *NewRecord) { record.Payload = bytes.Clone(value) }
 }
 
-// TestWithHeader adds or replaces a test header.
-func TestWithHeader(key, value string) TestRecordOption {
+// testWithHeader adds or replaces a test header.
+func testWithHeader(key, value string) testRecordOption {
 	return func(record *NewRecord) {
 		if record.Headers == nil {
 			record.Headers = map[string]string{}
@@ -852,18 +851,18 @@ func TestWithHeader(key, value string) TestRecordOption {
 	}
 }
 
-// TestWithAvailableAt sets test availability.
-func TestWithAvailableAt(value time.Time) TestRecordOption {
+// testWithAvailableAt sets test availability.
+func testWithAvailableAt(value time.Time) testRecordOption {
 	return func(record *NewRecord) { record.AvailableAt = value }
 }
 
-// TestWithMaxAttempts sets the persisted test attempt limit.
-func TestWithMaxAttempts(value int) TestRecordOption {
+// testWithMaxAttempts sets the persisted test attempt limit.
+func testWithMaxAttempts(value int) testRecordOption {
 	return func(record *NewRecord) { record.MaxAttempts = value }
 }
 
-// TestAssertImmutableEqual compares immutable content on the owning test goroutine.
-func TestAssertImmutableEqual(t testing.TB, want, got Record) {
+// testAssertImmutableEqual compares immutable content on the owning test goroutine.
+func testAssertImmutableEqual(t testing.TB, want, got Record) {
 	t.Helper()
 	if want.ID != got.ID || want.Destination != got.Destination || want.MessageType != got.MessageType ||
 		want.AggregateType != got.AggregateType || want.AggregateID != got.AggregateID ||
@@ -885,8 +884,8 @@ func equalHeaders(left, right map[string]string) bool {
 	return true
 }
 
-// TestRequireState loads a record and asserts its durable state.
-func TestRequireState(t testing.TB, reader IReader, id ID, state State) Record {
+// testRequireState loads a record and asserts its durable state.
+func testRequireState(t testing.TB, reader IReader, id ID, state State) Record {
 	t.Helper()
 	record, err := reader.Get(context.Background(), id)
 	if err != nil {
@@ -898,74 +897,25 @@ func TestRequireState(t testing.TB, reader IReader, id ID, state State) Record {
 	return record
 }
 
-// TestAssertLease verifies the public shape of an active lease.
-func TestAssertLease(t testing.TB, record Record, owner string) {
+// testAssertLease verifies the public shape of an active lease.
+func testAssertLease(t testing.TB, record Record, owner string) {
 	t.Helper()
 	if record.State != StateLeased || record.LeaseOwner != owner || record.LeaseToken == "" || record.LeaseUntil == nil || record.Version == 0 {
 		t.Fatalf("invalid lease: %#v", record)
 	}
 }
 
-// TestManualClock is a concurrency-safe deterministic Clock.
-type TestManualClock struct {
-	mu  sync.RWMutex
-	now time.Time
-}
-
-// NewTestManualClock constructs a clock at a canonical timestamp.
-func NewTestManualClock(now time.Time) *TestManualClock {
-	return &TestManualClock{now: CanonicalTime(now)}
-}
-
-// Now implements Clock.
-func (clock *TestManualClock) Now() time.Time {
-	clock.mu.RLock()
-	defer clock.mu.RUnlock()
-	return clock.now
-}
-
-// Set replaces the current canonical time.
-func (clock *TestManualClock) Set(value time.Time) {
-	clock.mu.Lock()
-	clock.now = CanonicalTime(value)
-	clock.mu.Unlock()
-}
-
-// Add advances the current time by duration.
-func (clock *TestManualClock) Add(duration time.Duration) {
-	clock.mu.Lock()
-	clock.now = CanonicalTime(clock.now.Add(duration))
-	clock.mu.Unlock()
-}
-
-// TestManualTimeDriver advances a TestManualClock without sleeping.
-type TestManualTimeDriver struct{ Clock *TestManualClock }
-
-func (driver TestManualTimeDriver) Now(ctx context.Context) (time.Time, error) {
-	if err := ctx.Err(); err != nil {
-		return time.Time{}, err
-	}
-	return driver.Clock.Now(), nil
-}
-func (driver TestManualTimeDriver) Elapse(ctx context.Context, duration time.Duration) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	driver.Clock.Add(duration)
-	return nil
-}
-
-// TestWallTimeDriver is suitable for integration stores whose authoritative
+// testWallTimeDriver is suitable for integration stores whose authoritative
 // server time cannot be advanced. Elapse uses a cancellable timer and includes
 // a small precision allowance; it never performs an unconditional long sleep.
-type TestWallTimeDriver struct {
+type testWallTimeDriver struct {
 	NowFunc func(context.Context) (time.Time, error)
 }
 
-func (driver TestWallTimeDriver) Now(ctx context.Context) (time.Time, error) {
+func (driver testWallTimeDriver) Now(ctx context.Context) (time.Time, error) {
 	return driver.NowFunc(ctx)
 }
-func (driver TestWallTimeDriver) Elapse(ctx context.Context, duration time.Duration) error {
+func (driver testWallTimeDriver) Elapse(ctx context.Context, duration time.Duration) error {
 	timer := time.NewTimer(duration + 2*time.Millisecond)
 	defer timer.Stop()
 	select {
@@ -976,38 +926,13 @@ func (driver TestWallTimeDriver) Elapse(ctx context.Context, duration time.Durat
 	}
 }
 
-// TestSequenceGenerator is a concurrency-safe deterministic ID and token
-// generator. It does not provide production cryptographic guarantees.
-type TestSequenceGenerator struct {
-	mu     sync.Mutex
-	prefix string
-	next   uint64
-}
-
-// NewTestSequenceGenerator constructs a generator with a stable prefix.
-func NewTestSequenceGenerator(prefix string) *TestSequenceGenerator {
-	return &TestSequenceGenerator{prefix: prefix}
-}
-func (generator *TestSequenceGenerator) nextValue() string {
-	generator.mu.Lock()
-	defer generator.mu.Unlock()
-	generator.next++
-	return fmt.Sprintf("%s-%06d", generator.prefix, generator.next)
-}
-
-// NewID returns the next deterministic ID.
-func (generator *TestSequenceGenerator) NewID() (ID, error) { return ID(generator.nextValue()), nil }
-
-// NewToken returns the next deterministic token.
-func (generator *TestSequenceGenerator) NewToken() (string, error) { return generator.nextValue(), nil }
-
-// TestRecordingSink records copied successful deliveries in call order.
-type TestRecordingSink struct {
+// testRecordingSink records copied successful deliveries in call order.
+type testRecordingSink struct {
 	mu      sync.Mutex
 	records []Record
 }
 
-func (sink *TestRecordingSink) Deliver(ctx context.Context, record Record) error {
+func (sink *testRecordingSink) Deliver(ctx context.Context, record Record) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1018,7 +943,7 @@ func (sink *TestRecordingSink) Deliver(ctx context.Context, record Record) error
 }
 
 // Records returns copied calls in delivery order.
-func (sink *TestRecordingSink) Records() []Record {
+func (sink *testRecordingSink) Records() []Record {
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
 	result := make([]Record, len(sink.records))
@@ -1028,18 +953,18 @@ func (sink *TestRecordingSink) Records() []Record {
 	return result
 }
 
-// TestScriptedSink records copied calls and returns a configured error sequence.
-type TestScriptedSink struct {
+// testScriptedSink records copied calls and returns a configured error sequence.
+type testScriptedSink struct {
 	mu     sync.Mutex
 	errors []error
 	calls  []Record
 }
 
-// NewTestScriptedSink constructs a sink with successive outcomes.
-func NewTestScriptedSink(outcomes ...error) *TestScriptedSink {
-	return &TestScriptedSink{errors: append([]error(nil), outcomes...)}
+// newTestScriptedSink constructs a sink with successive outcomes.
+func newTestScriptedSink(outcomes ...error) *testScriptedSink {
+	return &testScriptedSink{errors: append([]error(nil), outcomes...)}
 }
-func (sink *TestScriptedSink) Deliver(ctx context.Context, record Record) error {
+func (sink *testScriptedSink) Deliver(ctx context.Context, record Record) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1055,7 +980,7 @@ func (sink *TestScriptedSink) Deliver(ctx context.Context, record Record) error 
 }
 
 // Calls returns copied calls in delivery order.
-func (sink *TestScriptedSink) Calls() []Record {
+func (sink *testScriptedSink) Calls() []Record {
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
 	result := make([]Record, len(sink.calls))
@@ -1065,13 +990,13 @@ func (sink *TestScriptedSink) Calls() []Record {
 	return result
 }
 
-// TestBlockingSink reports starts and waits for Release or cancellation.
-type TestBlockingSink struct {
+// testBlockingSink reports starts and waits for Release or cancellation.
+type testBlockingSink struct {
 	Started chan Record
 	Release <-chan struct{}
 }
 
-func (sink *TestBlockingSink) Deliver(ctx context.Context, record Record) error {
+func (sink *testBlockingSink) Deliver(ctx context.Context, record Record) error {
 	select {
 	case sink.Started <- record.Clone():
 	case <-ctx.Done():
@@ -1085,26 +1010,26 @@ func (sink *TestBlockingSink) Deliver(ctx context.Context, record Record) error 
 	}
 }
 
-// Fault-injection operation names accepted by TestFaultStore.Fail.
+// Fault-injection operation names accepted by testFaultStore.Fail.
 const (
-	TestOperationAppend      = "append"
-	TestOperationClaim       = "claim"
-	TestOperationRenew       = "renew"
-	TestOperationAcknowledge = "acknowledge"
-	TestOperationRetry       = "retry"
-	TestOperationDeadLetter  = "dead_letter"
-	TestOperationRelease     = "release"
-	TestOperationGet         = "get"
-	TestOperationFind        = "find"
-	TestOperationCancel      = "cancel"
-	TestOperationReschedule  = "reschedule"
-	TestOperationRequeue     = "requeue"
-	TestOperationPurge       = "purge"
+	testOperationAppend      = "append"
+	testOperationClaim       = "claim"
+	testOperationRenew       = "renew"
+	testOperationAcknowledge = "acknowledge"
+	testOperationRetry       = "retry"
+	testOperationDeadLetter  = "dead_letter"
+	testOperationRelease     = "release"
+	testOperationGet         = "get"
+	testOperationFind        = "find"
+	testOperationCancel      = "cancel"
+	testOperationReschedule  = "reschedule"
+	testOperationRequeue     = "requeue"
+	testOperationPurge       = "purge"
 )
 
-// TestFaultStore decorates a portable store with bounded named failures.
-type TestFaultStore struct {
-	Store  ITestStore
+// testFaultStore decorates a portable store with bounded named failures.
+type testFaultStore struct {
+	Store  testStore
 	mu     sync.Mutex
 	faults map[string]*testFault
 }
@@ -1113,18 +1038,18 @@ type testFault struct {
 	err       error
 }
 
-// NewTestFaultStore constructs a fault decorator with no active faults.
-func NewTestFaultStore(store ITestStore) *TestFaultStore {
-	return &TestFaultStore{Store: store, faults: make(map[string]*testFault)}
+// newTestFaultStore constructs a fault decorator with no active faults.
+func newTestFaultStore(store testStore) *testFaultStore {
+	return &testFaultStore{Store: store, faults: make(map[string]*testFault)}
 }
 
 // Fail configures the next count calls of operation to return err.
-func (store *TestFaultStore) Fail(operation string, count int, err error) {
+func (store *testFaultStore) Fail(operation string, count int, err error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	store.faults[operation] = &testFault{remaining: count, err: err}
 }
-func (store *TestFaultStore) failure(operation string) error {
+func (store *testFaultStore) failure(operation string) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	fault := store.faults[operation]
@@ -1134,14 +1059,14 @@ func (store *TestFaultStore) failure(operation string) error {
 	fault.remaining--
 	return fault.err
 }
-func (store *TestFaultStore) Append(ctx context.Context, records ...NewRecord) ([]Record, error) {
-	if err := store.failure(TestOperationAppend); err != nil {
+func (store *testFaultStore) Append(ctx context.Context, records ...NewRecord) ([]Record, error) {
+	if err := store.failure(testOperationAppend); err != nil {
 		return nil, err
 	}
 	return store.Store.Append(ctx, records...)
 }
-func (store *TestFaultStore) AppendBatch(ctx context.Context, request AppendRequest) ([]Record, error) {
-	if err := store.failure(TestOperationAppend); err != nil {
+func (store *testFaultStore) AppendBatch(ctx context.Context, request AppendRequest) ([]Record, error) {
+	if err := store.failure(testOperationAppend); err != nil {
 		return nil, err
 	}
 	appender, ok := store.Store.(IBatchAppender)
@@ -1150,81 +1075,81 @@ func (store *TestFaultStore) AppendBatch(ctx context.Context, request AppendRequ
 	}
 	return appender.AppendBatch(ctx, request)
 }
-func (store *TestFaultStore) Claim(ctx context.Context, request ClaimRequest) ([]Record, error) {
-	if err := store.failure(TestOperationClaim); err != nil {
+func (store *testFaultStore) Claim(ctx context.Context, request ClaimRequest) ([]Record, error) {
+	if err := store.failure(testOperationClaim); err != nil {
 		return nil, err
 	}
 	return store.Store.Claim(ctx, request)
 }
-func (store *TestFaultStore) Renew(ctx context.Context, lease LeaseRef, until time.Time) error {
-	if err := store.failure(TestOperationRenew); err != nil {
+func (store *testFaultStore) Renew(ctx context.Context, lease LeaseRef, until time.Time) error {
+	if err := store.failure(testOperationRenew); err != nil {
 		return err
 	}
 	return store.Store.Renew(ctx, lease, until)
 }
-func (store *TestFaultStore) Acknowledge(ctx context.Context, lease LeaseRef, result DeliveryResult) error {
-	if err := store.failure(TestOperationAcknowledge); err != nil {
+func (store *testFaultStore) Acknowledge(ctx context.Context, lease LeaseRef, result DeliveryResult) error {
+	if err := store.failure(testOperationAcknowledge); err != nil {
 		return err
 	}
 	return store.Store.Acknowledge(ctx, lease, result)
 }
-func (store *TestFaultStore) Retry(ctx context.Context, lease LeaseRef, request RetryRequest) error {
-	if err := store.failure(TestOperationRetry); err != nil {
+func (store *testFaultStore) Retry(ctx context.Context, lease LeaseRef, request RetryRequest) error {
+	if err := store.failure(testOperationRetry); err != nil {
 		return err
 	}
 	return store.Store.Retry(ctx, lease, request)
 }
-func (store *TestFaultStore) DeadLetter(ctx context.Context, lease LeaseRef, failure Failure) error {
-	if err := store.failure(TestOperationDeadLetter); err != nil {
+func (store *testFaultStore) DeadLetter(ctx context.Context, lease LeaseRef, failure Failure) error {
+	if err := store.failure(testOperationDeadLetter); err != nil {
 		return err
 	}
 	return store.Store.DeadLetter(ctx, lease, failure)
 }
-func (store *TestFaultStore) Release(ctx context.Context, lease LeaseRef, at time.Time) error {
-	if err := store.failure(TestOperationRelease); err != nil {
+func (store *testFaultStore) Release(ctx context.Context, lease LeaseRef, at time.Time) error {
+	if err := store.failure(testOperationRelease); err != nil {
 		return err
 	}
 	return store.Store.Release(ctx, lease, at)
 }
-func (store *TestFaultStore) Get(ctx context.Context, id ID) (Record, error) {
-	if err := store.failure(TestOperationGet); err != nil {
+func (store *testFaultStore) Get(ctx context.Context, id ID) (Record, error) {
+	if err := store.failure(testOperationGet); err != nil {
 		return Record{}, err
 	}
 	return store.Store.Get(ctx, id)
 }
-func (store *TestFaultStore) Find(ctx context.Context, query Query) (Page, error) {
-	if err := store.failure(TestOperationFind); err != nil {
+func (store *testFaultStore) Find(ctx context.Context, query Query) (Page, error) {
+	if err := store.failure(testOperationFind); err != nil {
 		return Page{}, err
 	}
 	return store.Store.Find(ctx, query)
 }
-func (store *TestFaultStore) Cancel(ctx context.Context, id ID, reason string) error {
-	if err := store.failure(TestOperationCancel); err != nil {
+func (store *testFaultStore) Cancel(ctx context.Context, id ID, reason string) error {
+	if err := store.failure(testOperationCancel); err != nil {
 		return err
 	}
 	return store.Store.Cancel(ctx, id, reason)
 }
-func (store *TestFaultStore) Reschedule(ctx context.Context, id ID, at time.Time) error {
-	if err := store.failure(TestOperationReschedule); err != nil {
+func (store *testFaultStore) Reschedule(ctx context.Context, id ID, at time.Time) error {
+	if err := store.failure(testOperationReschedule); err != nil {
 		return err
 	}
 	return store.Store.Reschedule(ctx, id, at)
 }
-func (store *TestFaultStore) Requeue(ctx context.Context, id ID, options RequeueOptions) error {
-	if err := store.failure(TestOperationRequeue); err != nil {
+func (store *testFaultStore) Requeue(ctx context.Context, id ID, options RequeueOptions) error {
+	if err := store.failure(testOperationRequeue); err != nil {
 		return err
 	}
 	return store.Store.Requeue(ctx, id, options)
 }
-func (store *TestFaultStore) Purge(ctx context.Context, request PurgeRequest) (int, error) {
-	if err := store.failure(TestOperationPurge); err != nil {
+func (store *testFaultStore) Purge(ctx context.Context, request PurgeRequest) (int, error) {
+	if err := store.failure(testOperationPurge); err != nil {
 		return 0, err
 	}
 	return store.Store.Purge(ctx, request)
 }
 
-// TestWaitForState polls with a bounded context until a record reaches state.
-func TestWaitForState(ctx context.Context, reader IReader, id ID, state State, interval time.Duration) (Record, error) {
+// testWaitForState polls with a bounded context until a record reaches state.
+func testWaitForState(ctx context.Context, reader IReader, id ID, state State, interval time.Duration) (Record, error) {
 	if interval <= 0 {
 		interval = time.Millisecond
 	}
@@ -1246,4 +1171,4 @@ func TestWaitForState(ctx context.Context, reader IReader, id ID, state State, i
 	}
 }
 
-var _ IStore = (*TestFaultStore)(nil)
+var _ IStore = (*testFaultStore)(nil)

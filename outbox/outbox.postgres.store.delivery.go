@@ -22,7 +22,7 @@ func (store *PostgresStore) Claim(ctx context.Context, request ClaimRequest) ([]
 	tokens := make([]string, request.Limit)
 	seenTokens := make(map[string]struct{}, request.Limit)
 	for index := range tokens {
-		token, tokenErr := store.config.TokenGenerator.NewToken()
+		token, tokenErr := generateLeaseToken()
 		if tokenErr != nil {
 			return nil, tokenErr
 		}
@@ -30,7 +30,7 @@ func (store *PostgresStore) Claim(ctx context.Context, request ClaimRequest) ([]
 			return nil, tokenErr
 		}
 		if _, duplicate := seenTokens[token]; duplicate {
-			return nil, fmt.Errorf("%w: token generator returned a duplicate token", ErrInvalidArgument)
+			return nil, fmt.Errorf("%w: generated duplicate lease token", ErrInvalidArgument)
 		}
 		seenTokens[token] = struct{}{}
 		tokens[index] = token

@@ -81,7 +81,7 @@ func (appender *PostgresTxAppender) AppendBatch(ctx context.Context, request App
 	prepared := make([]Record, len(request.Records))
 	for index, input := range request.Records {
 		if input.ID == "" {
-			input.ID, err = appender.store.config.IDGenerator.NewID()
+			input.ID, err = generateID()
 			if err != nil {
 				return nil, err
 			}

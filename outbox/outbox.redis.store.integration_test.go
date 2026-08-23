@@ -1,4 +1,4 @@
-package outbox_test
+package outbox
 
 import (
 	"context"
@@ -7,8 +7,6 @@ import (
 	"os"
 	"testing"
 	"time"
-
-	"github.com/0x626f/react/outbox"
 
 	goredis "github.com/redis/go-redis/v9"
 )
@@ -20,17 +18,17 @@ func TestRedisStoreContract(t *testing.T) {
 	if url == "" {
 		t.Skipf("set %s to run Redis integration tests", redisTestURLVariable)
 	}
-	outbox.RunStoreContract(t, func(t testing.TB) outbox.TestHarness {
+	runStoreContract(t, func(t testing.TB) testHarness {
 		client, store := newRedisIntegrationStore(t, url)
 		t.Cleanup(func() { cleanupRedisNamespace(t, client, store.Keys()); _ = store.Close(); _ = client.Close() })
-		return outbox.TestHarness{
+		return testHarness{
 			Store: store,
-			Time: outbox.TestWallTimeDriver{NowFunc: func(ctx context.Context) (time.Time, error) {
+			Time: testWallTimeDriver{NowFunc: func(ctx context.Context) (time.Time, error) {
 				value, err := client.Time(ctx).Result()
-				return outbox.CanonicalTime(value), err
+				return CanonicalTime(value), err
 			}},
-			Capabilities: outbox.TestCapabilities{
-				UnsupportedQuery: &outbox.Query{States: []outbox.State{outbox.StatePending}, Destinations: []string{"events"}},
+			Capabilities: testCapabilities{
+				UnsupportedQuery: &Query{States: []State{StatePending}, Destinations: []string{"events"}},
 			},
 		}
 	})
@@ -44,7 +42,7 @@ func TestRedisScriptCacheReloadAndNoActiveTTL(t *testing.T) {
 	client, store := newRedisIntegrationStore(t, url)
 	t.Cleanup(func() { cleanupRedisNamespace(t, client, store.Keys()); _ = store.Close(); _ = client.Close() })
 	ctx := t.Context()
-	if _, err := store.Append(ctx, outbox.TestRecord(outbox.TestWithID("script-reload"))); err != nil {
+	if _, err := store.Append(ctx, testRecord(testWithID("script-reload"))); err != nil {
 		t.Fatal(err)
 	}
 	for _, key := range []string{store.Keys().Records(), store.Keys().Pending()} {
@@ -63,7 +61,7 @@ func TestRedisScriptCacheReloadAndNoActiveTTL(t *testing.T) {
 	} else {
 		t.Log("set OUTBOX_REDIS_ALLOW_SCRIPT_FLUSH=1 to additionally exercise NOSCRIPT recovery on an isolated Redis")
 	}
-	if _, err := store.Claim(ctx, outbox.ClaimRequest{Owner: "reload-worker", Limit: 1, LeaseDuration: time.Second}); err != nil {
+	if _, err := store.Claim(ctx, ClaimRequest{Owner: "reload-worker", Limit: 1, LeaseDuration: time.Second}); err != nil {
 		t.Fatalf("Claim after SCRIPT FLUSH: %v", err)
 	}
 	if ttl, err := client.TTL(ctx, store.Keys().Leased()).Result(); err != nil || ttl != -1 {
@@ -80,12 +78,12 @@ func TestRedisDestinationFilteredClaim(t *testing.T) {
 	t.Cleanup(func() { cleanupRedisNamespace(t, client, store.Keys()); _ = store.Close(); _ = client.Close() })
 	ctx := t.Context()
 	if _, err := store.Append(ctx,
-		outbox.TestRecord(outbox.TestWithID("destination-a"), outbox.TestWithDestination("alpha")),
-		outbox.TestRecord(outbox.TestWithID("destination-b"), outbox.TestWithDestination("beta")),
+		testRecord(testWithID("destination-a"), testWithDestination("alpha")),
+		testRecord(testWithID("destination-b"), testWithDestination("beta")),
 	); err != nil {
 		t.Fatal(err)
 	}
-	records, err := store.Claim(ctx, outbox.ClaimRequest{Owner: "filtered", Limit: 2, LeaseDuration: time.Second, Destinations: []string{"beta"}})
+	records, err := store.Claim(ctx, ClaimRequest{Owner: "filtered", Limit: 2, LeaseDuration: time.Second, Destinations: []string{"beta"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,23 +101,23 @@ func TestRedisPaginationRemainsFiniteAcrossConcurrentAppend(t *testing.T) {
 	t.Cleanup(func() { cleanupRedisNamespace(t, client, store.Keys()); _ = store.Close(); _ = client.Close() })
 	ctx := t.Context()
 	if _, err := store.Append(ctx,
-		outbox.TestRecord(outbox.TestWithID("cursor-a")),
-		outbox.TestRecord(outbox.TestWithID("cursor-b")),
-		outbox.TestRecord(outbox.TestWithID("cursor-c")),
+		testRecord(testWithID("cursor-a")),
+		testRecord(testWithID("cursor-b")),
+		testRecord(testWithID("cursor-c")),
 	); err != nil {
 		t.Fatal(err)
 	}
-	page, err := store.Find(ctx, outbox.Query{Sort: outbox.SortCreatedAt, Direction: outbox.SortAscending, Limit: 2})
+	page, err := store.Find(ctx, Query{Sort: SortCreatedAt, Direction: SortAscending, Limit: 2})
 	if err != nil || len(page.Records) != 2 || page.NextCursor == "" {
 		t.Fatalf("first page = %#v, %v", page, err)
 	}
-	if _, err = store.Append(ctx, outbox.TestRecord(outbox.TestWithID("cursor-d"))); err != nil {
+	if _, err = store.Append(ctx, testRecord(testWithID("cursor-d"))); err != nil {
 		t.Fatal(err)
 	}
-	seen := map[outbox.ID]struct{}{page.Records[0].ID: {}, page.Records[1].ID: {}}
+	seen := map[ID]struct{}{page.Records[0].ID: {}, page.Records[1].ID: {}}
 	cursor := page.NextCursor
 	for pages := 0; cursor != "" && pages < 10; pages++ {
-		page, err = store.Find(ctx, outbox.Query{Sort: outbox.SortCreatedAt, Direction: outbox.SortAscending, Limit: 2, Cursor: cursor})
+		page, err = store.Find(ctx, Query{Sort: SortCreatedAt, Direction: SortAscending, Limit: 2, Cursor: cursor})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -147,10 +145,10 @@ func TestRedisScriptTypeValidationPrecedesWrites(t *testing.T) {
 	if err := client.Set(ctx, store.Keys().Pending(), "wrong-type", 0).Err(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Append(ctx, outbox.TestRecord(outbox.TestWithID("wrong-type-append"))); err == nil {
+	if _, err := store.Append(ctx, testRecord(testWithID("wrong-type-append"))); err == nil {
 		t.Fatal("Append with a wrong-type index succeeded")
 	}
-	if _, err := store.Get(ctx, "wrong-type-append"); !errors.Is(err, outbox.ErrNotFound) {
+	if _, err := store.Get(ctx, "wrong-type-append"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("failed script partially inserted a record: %v", err)
 	}
 }
@@ -186,7 +184,7 @@ func TestRedisConnectionLossAndContextCancellation(t *testing.T) {
 	if err := client.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Get(context.Background(), "lost-connection"); err == nil || errors.Is(err, outbox.ErrNotFound) {
+	if _, err := store.Get(context.Background(), "lost-connection"); err == nil || errors.Is(err, ErrNotFound) {
 		t.Fatalf("Get after connection loss = %v, want a client connection error", err)
 	}
 	if err := store.Close(); err != nil {
@@ -210,8 +208,8 @@ local domain_current = redis.call('GET', KEYS[DOMAIN_KEY_OFFSET+1])
 if domain_current and domain_current ~= ARGV[DOMAIN_ARG_OFFSET+1] then return {-3} end
 `
 	apply := `redis.call('SET', KEYS[DOMAIN_KEY_OFFSET+1], ARGV[DOMAIN_ARG_OFFSET+2])`
-	request := outbox.RedisCompositionRequest{
-		Append:     outbox.AppendRequest{Records: []outbox.NewRecord{outbox.TestRecord(outbox.TestWithID("composed-record"))}, DuplicateMode: outbox.RejectDuplicate},
+	request := RedisCompositionRequest{
+		Append:     AppendRequest{Records: []NewRecord{testRecord(testWithID("composed-record"))}, DuplicateMode: RejectDuplicate},
 		DomainKeys: []string{domainKey}, DomainArguments: []any{"", "confirmed"},
 		ValidateLua: validation, ApplyLua: apply,
 	}
@@ -222,12 +220,12 @@ if domain_current and domain_current ~= ARGV[DOMAIN_ARG_OFFSET+1] then return {-
 		t.Fatalf("domain value = %q, %v", value, err)
 	}
 
-	request.Append.Records[0] = outbox.TestRecord(outbox.TestWithID("rejected-composed-record"))
+	request.Append.Records[0] = testRecord(testWithID("rejected-composed-record"))
 	request.DomainArguments = []any{"unexpected", "changed"}
-	if _, err := store.Compose(t.Context(), request); !errors.Is(err, outbox.ErrConflict) {
+	if _, err := store.Compose(t.Context(), request); !errors.Is(err, ErrConflict) {
 		t.Fatalf("conflicting Compose = %v", err)
 	}
-	if _, err := store.Get(t.Context(), "rejected-composed-record"); !errors.Is(err, outbox.ErrNotFound) {
+	if _, err := store.Get(t.Context(), "rejected-composed-record"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("outbox side of rejected composition = %v", err)
 	}
 	if value, _ := client.Get(t.Context(), domainKey).Result(); value != "confirmed" {
@@ -235,7 +233,7 @@ if domain_current and domain_current ~= ARGV[DOMAIN_ARG_OFFSET+1] then return {-
 	}
 }
 
-func newRedisIntegrationStore(t testing.TB, rawURL string) (goredis.UniversalClient, *outbox.RedisStore) {
+func newRedisIntegrationStore(t testing.TB, rawURL string) (goredis.UniversalClient, *RedisStore) {
 	t.Helper()
 	options, err := goredis.ParseURL(rawURL)
 	if err != nil {
@@ -243,12 +241,11 @@ func newRedisIntegrationStore(t testing.TB, rawURL string) (goredis.UniversalCli
 	}
 	client := goredis.NewClient(options)
 	namespace := fmt.Sprintf("test-%d", time.Now().UnixNano())
-	config := outbox.DefaultRedisConfig()
+	config := DefaultRedisConfig()
 	config.Namespace = namespace
 	config.RequireNoEviction = false
 	config.AllowUnsafeEviction = true
-	config.TokenGenerator = outbox.NewTestSequenceGenerator("redis-lease")
-	store, err := outbox.NewRedisStore(context.Background(), client, config)
+	store, err := NewRedisStore(context.Background(), client, config)
 	if err != nil {
 		_ = client.Close()
 		t.Fatalf("NewRedisStore: %v", err)
@@ -256,7 +253,7 @@ func newRedisIntegrationStore(t testing.TB, rawURL string) (goredis.UniversalCli
 	return client, store
 }
 
-func cleanupRedisNamespace(t testing.TB, client goredis.UniversalClient, keys outbox.RedisKeys) {
+func cleanupRedisNamespace(t testing.TB, client goredis.UniversalClient, keys RedisKeys) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -38,8 +38,6 @@ var (
 	// Redis selects RedisStoreService. Provide RedisConfig at
 	// OutboxRedisConfigToken and import React's Redis module.
 	Redis = DefineStoreFeature("redis", RedisStoreServiceProvider)
-	// Inmemory selects the process-local, non-durable InmemoryStoreService.
-	Inmemory = DefineStoreFeature("inmemory", InmemoryStoreServiceProvider)
 )
 
 // ForFeature creates one outbox module backed by storage. The optional Config
