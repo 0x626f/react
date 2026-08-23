@@ -171,7 +171,21 @@ func retryDelays(count int, delay time.Duration) []time.Duration {
 }
 
 func (service *Service) Channel() (channel Channel, err error) {
-	if err = service.WaitReady(); err != nil {
+	return service.ChannelContext(service.Ctx)
+}
+
+// ChannelContext opens a channel after waiting for connection readiness while
+// honoring the caller's deadline. Long-running infrastructure adapters should
+// prefer it to Channel so an individual operation cannot wait for reconnect
+// beyond its own context.
+func (service *Service) ChannelContext(ctx context.Context) (channel Channel, err error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("rabbit channel context is required")
+	}
+	if err = service.WaitReadyContext(ctx); err != nil {
+		return nil, err
+	}
+	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
 
@@ -205,9 +219,28 @@ func (service *Service) Restarting() bool {
 }
 
 func (service *Service) WaitReady() error {
+	return service.WaitReadyContext(service.Ctx)
+}
+
+// WaitReadyContext waits for a usable connection until either the caller or
+// the RMQ service lifecycle is cancelled.
+func (service *Service) WaitReadyContext(ctx context.Context) error {
+	if ctx == nil {
+		return fmt.Errorf("rabbit readiness context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	service.mu.RLock()
 	ready := service.ready
+	serviceCtx := service.Ctx
 	service.mu.RUnlock()
+	if serviceCtx == nil {
+		serviceCtx = context.Background()
+	}
+	if err := serviceCtx.Err(); err != nil {
+		return err
+	}
 
 	if ready == nil {
 		return fmt.Errorf("rabbit connection is not initialized")
@@ -216,8 +249,10 @@ func (service *Service) WaitReady() error {
 	select {
 	case <-ready:
 		return nil
-	case <-service.Ctx.Done():
-		return service.Ctx.Err()
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-serviceCtx.Done():
+		return serviceCtx.Err()
 	}
 }
 

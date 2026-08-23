@@ -3,7 +3,6 @@ package react
 import (
 	"context"
 
-	"github.com/0x626f/author"
 	"github.com/0x626f/gioc"
 )
 
@@ -17,15 +16,14 @@ type BaseService struct {
 	Stop context.CancelFunc
 
 	ApplicationService *ApplicationService
-	Logger             *author.Logger
+	Logger             ILogger
 }
 
-func (service *BaseService) Bootstrap(impl gioc.Token, injections gioc.Injections) {
+func (service *BaseService) Bootstrap(_ gioc.Token, injections gioc.Injections) {
 	injections.Require(BaseServiceInjections...)
 
 	service.ApplicationService = gioc.MustResolve[*ApplicationService](ApplicationContextServiceToken, injections)
-	service.Logger = gioc.MustResolve[*author.Logger](LoggerToken, injections)
-	service.Logger.Name = impl
+	service.Logger = gioc.MustResolve[ILogger](LoggerToken, injections)
 
 	service.Ctx, service.Stop = service.ApplicationService.DeriveContext()
 }

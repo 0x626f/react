@@ -18,6 +18,14 @@ type Service struct {
 	client *goredis.Client
 }
 
+// Client exposes the application-owned, context-aware go-redis client for
+// infrastructure adapters such as outbox/redis. Callers must not close it;
+// Service retains lifecycle ownership. Individual operations must pass their
+// request or application context rather than reusing Service.Ctx.
+func (service *Service) Client() goredis.UniversalClient {
+	return service.client
+}
+
 func NewService(injections gioc.Injections) (*Service, error) {
 	gioc.Require(injections, ServiceInjections...)
 

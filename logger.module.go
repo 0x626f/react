@@ -8,6 +8,9 @@ import (
 const LoggerToken = "Logger"
 const LoggerConfigToken gioc.Token = "LoggerConfig"
 
+// ILogger is React's alias of the logging contract provided by author.
+type ILogger = author.ILogger
+
 type LoggerModuleConfig struct {
 	Level author.LogLevel `env:"LOG_LEVEL"`
 }
@@ -15,9 +18,9 @@ type LoggerModuleConfig struct {
 func Logger(config author.Config) gioc.IProvider {
 	return gioc.FactoryProvider(
 		LoggerToken,
-		gioc.Factory[*author.Logger]{
+		gioc.Factory[ILogger]{
 			ValueScope: gioc.Prototype,
-			Constructor: func(injections gioc.Injections) (*author.Logger, error) {
+			Constructor: func(injections gioc.Injections) (ILogger, error) {
 				return author.New(config), nil
 			},
 		},
@@ -32,10 +35,10 @@ func LoggerModule() *gioc.Module {
 		Provide(
 			gioc.FactoryProvider(
 				LoggerToken,
-				gioc.Factory[*author.Logger]{
+				gioc.Factory[ILogger]{
 					Injects:    []gioc.Token{LoggerConfigToken},
 					ValueScope: gioc.Prototype,
-					Constructor: func(injections gioc.Injections) (*author.Logger, error) {
+					Constructor: func(injections gioc.Injections) (ILogger, error) {
 						gioc.Require(injections, LoggerConfigToken)
 						config := gioc.MustResolve[*LoggerModuleConfig](LoggerConfigToken, injections)
 

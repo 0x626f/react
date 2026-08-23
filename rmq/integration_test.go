@@ -473,7 +473,7 @@ func testRmqModule() *gioc.Module {
 func newTestProducer(t *testing.T, container *gioc.Container, app *react.ApplicationService, rmqService *Service) *ProducerService {
 	t.Helper()
 
-	logger, err := gioc.Get[*author.Logger](container, react.LoggerToken)
+	logger, err := gioc.Get[react.ILogger](container, react.LoggerToken)
 	if err != nil {
 		t.Fatalf("resolve logger: %v", err)
 	}

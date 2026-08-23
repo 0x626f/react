@@ -1,11 +1,15 @@
 github.com/0x626f/author v0.0.0-20260326182201-06e950cce083 h1:/Qq4gVhEr3ussqmp7BmsiajaPZcaZW2up9S28ZxdUSE=
 github.com/0x626f/author v0.0.0-20260326182201-06e950cce083/go.mod h1:Izb6HmJ5srKRuUsZETQpkNHYPgMNoZwjPE4G2kbx/QQ=
+github.com/0x626f/author v0.2.0 h1:vAJg4opukpl3LZ7drRDV4UiYkXRwHJO+ZqHC1Gjfx0o=
+github.com/0x626f/author v0.2.0/go.mod h1:Izb6HmJ5srKRuUsZETQpkNHYPgMNoZwjPE4G2kbx/QQ=
 github.com/0x626f/gioc v0.1.1 h1:5v32riNK2DB2qOkWsywSDwQZ3VgqIRQ/xj/ZWD9ECEs=
 github.com/0x626f/gioc v0.1.1/go.mod h1:+BbSevOxm1AuaWZdLKEYwMrvYpef28aFBoTqwR6imlQ=
+github.com/0x626f/gioc v0.1.2 h1:OGdZP3A8VL8ZtruoCf0J/wl8AqBr4yp8u2URmjpNFVY=
+github.com/0x626f/gioc v0.1.2/go.mod h1:+BbSevOxm1AuaWZdLKEYwMrvYpef28aFBoTqwR6imlQ=
 github.com/0x626f/gota v0.0.0-20260618185103-af509543bc30 h1:a47902a7tPrnmI6x+rdu3GaVgJOdoBmtsZUMEBFKB+A=
 github.com/0x626f/gota v0.0.0-20260618185103-af509543bc30/go.mod h1:aJlT3LXK1Se3RWa7ys4YunRZq1SWdlNATy5TBwvY6B4=
-github.com/0x626f/pgxext v0.0.0-20260401130039-2021da7bd602 h1:cGqP0YSpysspIDRvCZw6AH3Wslci7Ey2cjgEJayRTac=
-github.com/0x626f/pgxext v0.0.0-20260401130039-2021da7bd602/go.mod h1:oaj1vtGE2vBGeMlVxe3gUhKTfMjWTh+USWzjYpFR3f0=
+github.com/0x626f/pgxext v0.2.0 h1:8Gbs1nTP6Gu4GHaCZsm1Q8p8FhQ3I/nFa1AxZy+bgT8=
+github.com/0x626f/pgxext v0.2.0/go.mod h1:oaj1vtGE2vBGeMlVxe3gUhKTfMjWTh+USWzjYpFR3f0=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
 github.com/bsm/ginkgo/v2 v2.12.0/go.mod h1:SwYbGRRDovPVboqFv0tPTcG1sN61LM1Z4ARdbAV9g4c=
 github.com/bsm/gomega v1.27.10 h1:yeMWxP2pV2fG3FgAODIY8EiRE3dy0aeFYt4l7wh6yKA=

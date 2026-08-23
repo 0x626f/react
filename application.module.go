@@ -59,6 +59,7 @@ type ApplicationService struct {
 	cancel context.CancelFunc
 
 	shutdownHooksEnabled bool
+	preShutdownHooks     []ShutDownHook
 	shutdownHooks        []ShutDownHook
 }
 
@@ -68,6 +69,9 @@ func (service *ApplicationService) Await() {
 
 func (service *ApplicationService) Shutdown() {
 	if service.shutdownHooksEnabled {
+		for _, hook := range service.preShutdownHooks {
+			hook()
+		}
 		for _, hook := range service.shutdownHooks {
 			hook()
 		}
@@ -77,6 +81,12 @@ func (service *ApplicationService) Shutdown() {
 
 func (service *ApplicationService) AddHook(hook ShutDownHook) {
 	service.shutdownHooks = append(service.shutdownHooks, hook)
+}
+
+// AddPreShutdownHook registers work that must finish before ordinary resource
+// close hooks. Hooks within each tier retain registration order.
+func (service *ApplicationService) AddPreShutdownHook(hook ShutDownHook) {
+	service.preShutdownHooks = append(service.preShutdownHooks, hook)
 }
 
 func (service *ApplicationService) DeriveContext() (context.Context, context.CancelFunc) {

@@ -25,6 +25,7 @@
 - environment-backed config registration and derived config providers
 - reusable base service structs for context, logger, and config injection
 - optional Redis, PostgreSQL, and RabbitMQ modules
+- a generic transactional outbox with inmemory, PostgreSQL, and Redis storage
 
 ## Installation
 
@@ -257,6 +258,11 @@ Provide `reactpostgres.ConfigToken` with a `*postgres.Config` containing `URL` b
 ```bash
 go test ./...
 ```
+
+## Transactional Outbox
+
+The storage-independent outbox, adapters, worker pool, operational APIs, and
+production guidance are documented in [outbox/README.md](outbox/README.md).
 
 RabbitMQ integration tests are skipped unless `RMQ_TEST_URL` is set, for example:
 
