@@ -5,19 +5,12 @@ import (
 	"reflect"
 
 	"github.com/0x626f/gioc"
-	"github.com/0x626f/react"
 )
 
-// StoreProviderFactory creates a fresh provider for an adapter StoreService at
+// StoreProviderFactory creates a fresh provider for an adapter store service at
 // the requested aggregate-store token. Applications normally select one of the
 // first-party feature values.
 type StoreProviderFactory func(token gioc.Token) gioc.IProvider
-
-// IStoreServiceInitializer lets the root package expose first-party shorthand
-// features without importing adapter packages and creating import cycles.
-type IStoreServiceInitializer interface {
-	InitializeOutboxStoreService(injections gioc.Injections) (IStore, error)
-}
 
 // StoreFeature is an immutable storage adapter description selected by
 // ForFeature.
@@ -39,24 +32,14 @@ func DefineStoreFeature(name string, provider StoreProviderFactory) StoreFeature
 func (feature StoreFeature) Name() string { return feature.name }
 
 var (
-	// Postgres selects outbox/postgres. Provide *postgres.Config at
+	// Postgres selects PostgresStoreService. Provide PostgresConfig at
 	// OutboxPostgresConfigToken and import React's PostgreSQL module.
-	Postgres = DefineStoreFeature("postgres", configuredStoreServiceProvider(
-		OutboxPostgresConfigToken,
-		postgresDataSourceToken,
-	))
-	// Redis selects outbox/redis. Provide *redis.Config at
+	Postgres = DefineStoreFeature("postgres", PostgresStoreServiceProvider)
+	// Redis selects RedisStoreService. Provide RedisConfig at
 	// OutboxRedisConfigToken and import React's Redis module.
-	Redis = DefineStoreFeature("redis", configuredStoreServiceProvider(
-		OutboxRedisConfigToken,
-		redisServiceToken,
-		applicationContextToken,
-	))
-	// Inmemory selects outbox/inmemory. It is process-local and non-durable.
-	// Provide *inmemory.Config at OutboxInmemoryConfigToken.
-	Inmemory = DefineStoreFeature("inmemory", configuredStoreServiceProvider(
-		OutboxInmemoryConfigToken,
-	))
+	Redis = DefineStoreFeature("redis", RedisStoreServiceProvider)
+	// Inmemory selects the process-local, non-durable InmemoryStoreService.
+	Inmemory = DefineStoreFeature("inmemory", InmemoryStoreServiceProvider)
 )
 
 // ForFeature creates one outbox module backed by storage. The optional Config
@@ -114,38 +97,6 @@ func invalidStoreFeatureProvider(feature StoreFeature) gioc.IProvider {
 		),
 		true,
 	)
-}
-
-func configuredStoreServiceProvider(configToken gioc.Token, dependencies ...gioc.Token) StoreProviderFactory {
-	injects := make([]gioc.Token, 1, len(dependencies)+2)
-	injects[0] = configToken
-	injects = append(injects, dependencies...)
-	injects = append(injects, react.LoggerToken)
-	return func(token gioc.Token) gioc.IProvider {
-		featureInjects := append([]gioc.Token(nil), injects...)
-		return gioc.FactoryProvider(
-			token,
-			gioc.NewFactory(
-				featureInjects,
-				gioc.Singleton,
-				func(injections gioc.Injections) (IStore, error) {
-					initializer := gioc.MustResolve[IStoreServiceInitializer](configToken, injections)
-					if isNilValue(initializer) {
-						return nil, fmt.Errorf("%w: outbox config at %q is nil", ErrInvalidArgument, configToken)
-					}
-					store, err := initializer.InitializeOutboxStoreService(injections)
-					if err != nil {
-						return nil, err
-					}
-					if isNilValue(store) {
-						return nil, fmt.Errorf("%w: outbox config at %q returned a nil store service", ErrInvalidArgument, configToken)
-					}
-					return store, nil
-				},
-			),
-			true,
-		)
-	}
 }
 
 func isNilValue(value any) bool {

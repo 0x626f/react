@@ -8,9 +8,6 @@ import (
 const LoggerToken = "Logger"
 const LoggerConfigToken gioc.Token = "LoggerConfig"
 
-// ILogger is React's alias of the logging contract provided by author.
-type ILogger = author.ILogger
-
 type LoggerModuleConfig struct {
 	Level author.LogLevel `env:"LOG_LEVEL"`
 }

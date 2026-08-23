@@ -25,11 +25,11 @@ outboxModule := outbox.ForFeature(outbox.Postgres, workerConfig).
 The selected adapter configuration remains a normal GIOC value:
 
 ```go
-storeConfig := outboxpostgres.DefaultConfig()
+storeConfig := outbox.DefaultPostgresConfig()
 storeConfig.Namespace = "orders"
 
 postgresConfigModule := gioc.NewModule("OrdersOutboxConfig").Provide(
-    outboxpostgres.ProvideConfig(storeConfig),
+    outbox.ProvidePostgresConfig(storeConfig),
 )
 ```
 
@@ -125,7 +125,7 @@ The caller owns the outer transaction. `Bind` uses a savepoint for atomic
 batch validation and never commits or rolls back the outer transaction.
 
 Redis composition is possible only when domain keys and outbox keys share the
-same Redis Cluster hash slot. See `redis.CompositionRequest`. PostgreSQL domain
+same Redis Cluster hash slot. See `outbox.RedisCompositionRequest`. PostgreSQL domain
 state plus a Redis outbox is not a transactional outbox.
 
 ## Delivery model
@@ -185,30 +185,30 @@ and broker connections remain owned by their infrastructure modules.
 
 ### In-memory
 
-`outbox/inmemory` is concurrency-safe and deterministic with injected clocks
-and generators. It is process-local and loses all records on shutdown. Use it
-for tests, examples, and explicitly ephemeral applications.
+`outbox.InmemoryStore` is concurrency-safe and deterministic with injected
+clocks and generators. It is process-local and loses all records on shutdown.
+Use it for tests, examples, and explicitly ephemeral applications.
 
 ### PostgreSQL
 
-`outbox/postgres` provides durable storage with `FOR UPDATE SKIP LOCKED`, fenced
-mutations, indexed operational queries, transaction binding, and explicit
-migrations. Apply `Store.Migrations()` or `Store.Migrate(ctx)` during deployment
-before the service begins processing records. The application owns the pgx
-pool.
+`outbox.PostgresStore` provides durable storage with `FOR UPDATE SKIP LOCKED`,
+fenced mutations, indexed operational queries, transaction binding, and
+explicit migrations. Apply `PostgresStore.Migrations()` or
+`PostgresStore.Migrate(ctx)` during deployment before the service begins
+processing records. The application owns the pgx pool.
 
 ### Redis
 
-`outbox/redis` uses bounded atomic Lua scripts and same-slot keys. Redis is
-authoritative storage, not a cache. Production use requires a deliberate AOF,
-replication, backup, failover, and `noeviction` posture. Startup durability
-checks can warn or fail according to `DurabilityMode`. The application owns the
-Redis client.
+`outbox.RedisStore` uses bounded atomic Lua scripts and same-slot keys. Redis
+is authoritative storage, not a cache. Production use requires a deliberate
+AOF, replication, backup, failover, and `noeviction` posture. Startup
+durability checks can warn or fail according to `DurabilityMode`. The
+application owns the Redis client.
 
 ## Logging
 
 `react.ILogger` is an alias of `author.ILogger`. `Service` and each adapter
-`StoreService` resolve it from `react.LoggerToken`; the standard
+store service resolve it from `react.LoggerToken`; the standard
 `react.LoggerModule()` supplies the implementation. Logging is limited to
 operational failures and durability warnings; payloads and headers are never
 logged by first-party code.
@@ -218,8 +218,8 @@ logged by first-party code.
 Run unit, lifecycle, routing, lease, retry, and adapter contract tests:
 
 ```sh
-go test ./outbox/...
-go test -race ./outbox/...
+go test ./outbox
+go test -race ./outbox
 ```
 
 PostgreSQL and Redis integration tests use `OUTBOX_POSTGRES_TEST_URL` and

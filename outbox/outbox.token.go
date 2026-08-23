@@ -25,18 +25,12 @@ const (
 	// OutboxMaintenanceStoreToken exposes state-aware administrative operations.
 	OutboxMaintenanceStoreToken gioc.Token = "OutboxMaintenanceStore"
 
-	// OutboxPostgresConfigToken is consumed by postgres.StoreService.
+	// OutboxPostgresConfigToken is consumed by PostgresStoreService.
 	OutboxPostgresConfigToken gioc.Token = "OutboxPostgresConfig"
-	// OutboxRedisConfigToken is consumed by redis.StoreService.
+	// OutboxRedisConfigToken is consumed by RedisStoreService.
 	OutboxRedisConfigToken gioc.Token = "OutboxRedisConfig"
-	// OutboxInmemoryConfigToken is consumed by inmemory.StoreService.
+	// OutboxInmemoryConfigToken is consumed by InmemoryStoreService.
 	OutboxInmemoryConfigToken gioc.Token = "OutboxInmemoryConfig"
-
-	// These existing React infrastructure token values avoid importing adapter
-	// packages into the root outbox package.
-	postgresDataSourceToken gioc.Token = "PostgresDataSource"
-	redisServiceToken       gioc.Token = "RedisService"
-	applicationContextToken gioc.Token = "ApplicationContext"
 )
 
 // ServiceInjections are the complete dependencies resolved by NewService.

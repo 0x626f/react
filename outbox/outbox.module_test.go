@@ -11,7 +11,6 @@ import (
 	"github.com/0x626f/gioc"
 	"github.com/0x626f/react"
 	"github.com/0x626f/react/outbox"
-	"github.com/0x626f/react/outbox/inmemory"
 )
 
 type moduleSink struct{ delivered chan outbox.Record }
@@ -26,9 +25,9 @@ func (sink *moduleSink) Deliver(ctx context.Context, record outbox.Record) error
 }
 
 func TestForFeatureInitializesServiceAndProvidesCapabilities(t *testing.T) {
-	storeConfig := inmemory.DefaultConfig()
+	storeConfig := outbox.DefaultInmemoryConfig()
 	workerConfig := moduleServiceConfig()
-	configModule := gioc.NewModule("OutboxModuleTestConfig").Provide(inmemory.ProvideConfig(storeConfig))
+	configModule := gioc.NewModule("OutboxModuleTestConfig").Provide(outbox.ProvideInmemoryConfig(storeConfig))
 	featureModule := outbox.ForFeature(outbox.Inmemory, workerConfig).Import(configModule)
 	container, application := runOutboxContainer(t, featureModule)
 	var shutdownOnce sync.Once
@@ -45,7 +44,7 @@ func TestForFeatureInitializesServiceAndProvidesCapabilities(t *testing.T) {
 	if service.Logger == nil {
 		t.Fatal("outbox Service did not resolve ILogger")
 	}
-	storeService, err := gioc.Get[*inmemory.StoreService](container, outbox.OutboxStoreToken, featureModule)
+	storeService, err := gioc.Get[*outbox.InmemoryStoreService](container, outbox.OutboxStoreToken, featureModule)
 	if err != nil {
 		t.Fatalf("resolve inmemory StoreService = %v", err)
 	}
@@ -103,7 +102,7 @@ func TestForFeatureInitializesServiceAndProvidesCapabilities(t *testing.T) {
 
 func TestForFeatureRoutesMultipleDestinationsThroughOneWorkerPool(t *testing.T) {
 	configModule := gioc.NewModule("OutboxMultipleRoutesTestConfig").Provide(
-		inmemory.ProvideConfig(inmemory.DefaultConfig()),
+		outbox.ProvideInmemoryConfig(outbox.DefaultInmemoryConfig()),
 	)
 	featureModule := outbox.ForFeature(outbox.Inmemory, moduleServiceConfig()).Import(configModule)
 	container, application := runOutboxContainer(t, featureModule)
@@ -138,19 +137,19 @@ func TestForFeatureRoutesMultipleDestinationsThroughOneWorkerPool(t *testing.T) 
 
 func TestAdapterFeatureValueUsesStoreService(t *testing.T) {
 	configModule := gioc.NewModule("OutboxAdapterFeatureTestConfig").Provide(
-		gioc.ValueProvider(outbox.OutboxInmemoryConfigToken, inmemory.DefaultConfig(), true),
+		gioc.ValueProvider(outbox.OutboxInmemoryConfigToken, outbox.DefaultInmemoryConfig(), true),
 	)
-	featureModule := outbox.ForFeature(inmemory.Inmemory).Import(configModule)
+	featureModule := outbox.ForFeature(outbox.Inmemory).Import(configModule)
 	container, application := runOutboxContainer(t, featureModule)
 	t.Cleanup(application.Shutdown)
-	if _, err := gioc.Get[*inmemory.StoreService](container, outbox.OutboxStoreToken, featureModule); err != nil {
+	if _, err := gioc.Get[*outbox.InmemoryStoreService](container, outbox.OutboxStoreToken, featureModule); err != nil {
 		t.Fatalf("resolve inmemory StoreService = %v", err)
 	}
 }
 
 func TestForFeatureRejectsNilStoreConfig(t *testing.T) {
 	configModule := gioc.NewModule("OutboxNilConfigTestConfig").Provide(
-		gioc.ValueProvider(outbox.OutboxInmemoryConfigToken, (*inmemory.Config)(nil), true),
+		gioc.ValueProvider(outbox.OutboxInmemoryConfigToken, (*outbox.InmemoryConfig)(nil), true),
 	)
 	featureModule := outbox.ForFeature(outbox.Inmemory).Import(configModule)
 	applicationModule := react.ApplicationModuleFor(react.ApplicationConfig{Parent: context.Background()})
